@@ -151,13 +151,13 @@ Use **conventional commits**. Create small, reviewable PRs.
 - `api/migrations/001_init.sql` with sessions/parties/events tables plus indexes.
 - Added `migrate:apply` script (`wrangler d1 migrations apply DB`) to `package.json`.
 
-### ✅ CHECKPOINT 3
+### ✅ CHECKPOINT 3 — COMPLETED 2025-10-08
 **Commit:** `feat(api): HTTP router + Turnstile siteverify + KV code map`  
-**Do:**
-- Implement endpoints in `worker.ts` (see section 4.2).
-- Implement Turnstile `/siteverify` call on `/join`.
-- Implement short‑code generation + uniqueness + KV put/get.
-- Set host auth cookie (HMAC(doId)) or return PIN in JSON.
+**Delivered:**
+- `api/worker.ts` now routes `/api/queue` endpoints, validates input, and proxies to DO stubs.
+- Turnstile verification implemented with remote IP forwarding.
+- Short-code generation + KV backfill + D1 insert for new sessions, plus host auth cookie (HMAC).
+- Basic CORS handling, host-action auth guard, and DO proxy helpers in place.
 
 ### ✅ CHECKPOINT 4
 **Commit:** `feat(api): QueueDO WebSockets, state machine, alarms, D1 writes`  
