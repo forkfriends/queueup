@@ -1,0 +1,74 @@
+import { StyleSheet } from 'react-native';
+
+export default StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#FAF9FA' },
+  scroll: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 24,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginVertical: 20,
+  },
+  card: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    padding: 20,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  actionsRow: {
+    marginTop: 22,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelText: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#222',
+  },
+  cancelBox: {
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  button: {
+    backgroundColor: '#222',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
