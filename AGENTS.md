@@ -159,14 +159,13 @@ Use **conventional commits**. Create small, reviewable PRs.
 - Short-code generation + KV backfill + D1 insert for new sessions, plus host auth cookie (HMAC).
 - Basic CORS handling, host-action auth guard, and DO proxy helpers in place.
 
-### ✅ CHECKPOINT 4
+### ✅ CHECKPOINT 4 — COMPLETED 2025-10-08
 **Commit:** `feat(api): QueueDO WebSockets, state machine, alarms, D1 writes`  
-**Do:**
-- In `queue-do.ts`, accept WS upgrade, distinguish host vs guest (cookie vs `?partyId`).
-- Implement `join/advance/declareNearby/leave/kick/close` (HTTP and/or WS message paths).
-- Broadcast **snapshot/delta** to host & per‑guest updates.
-- On `advance`, set **Alarm**; in `alarm()` mark **no_show** and auto‑advance.
-- Persist only lifecycle events to D1.
+**Delivered:**
+- `api/queue-do.ts` implements queue state machine, host/guest WebSockets, alarms, and D1 persistence.
+- Shared host-auth helpers extracted to `api/utils/auth.ts` for Worker/DO parity.
+- Guests receive position/called/removed/closed updates; hosts get queue snapshots & now-serving info.
+- `alarm()` flags no-shows and auto-advances; all lifecycle mutations persist to D1 event log.
 
 ### ✅ CHECKPOINT 5
 **Commit:** `test(api): unit + integration tests (Miniflare), coverage thresholds`  
