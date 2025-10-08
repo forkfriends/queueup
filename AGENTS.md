@@ -137,19 +137,19 @@ Broadcast contract:
 ## 6) Implementation steps & git checkpoints
 Use **conventional commits**. Create small, reviewable PRs.
 
-### ✅ CHECKPOINT 1
+### ✅ CHECKPOINT 1 — COMPLETED 2025-10-08
 **Commit:** `chore(api): bootstrap Cloudflare Worker config and stubs`  
-**Do:**
-- Add `api/wrangler.toml` with DO/D1/KV bindings + Cron schedule.
-- Create `api/worker.ts` (module worker; `fetch` + `scheduled` stubs).
-- Create `api/queue-do.ts` (class stub).  
-- Add `tsconfig.json` (includes `"lib":["WebWorker"]`) and `@cloudflare/workers-types` dev dep.
+**Delivered:**
+- `api/wrangler.toml` with DO/D1/KV bindings + cron schedule scaffold.
+- Stubbed `api/worker.ts` exposing typed env + placeholder `fetch`/`scheduled`.
+- Stubbed `api/queue-do.ts` with `QueueDO` skeleton and env import.
+- `api/tsconfig.json` targeting Workers + dev dependency `@cloudflare/workers-types`.
 
-### ✅ CHECKPOINT 2
+### ✅ CHECKPOINT 2 — COMPLETED 2025-10-08
 **Commit:** `feat(api): add D1 schema migration (sessions, parties, events)`  
-**Do:**
-- Add `api/migrations/001_init.sql` (schema above).
-- Add npm script to apply migrations locally via Wrangler.
+**Delivered:**
+- `api/migrations/001_init.sql` with sessions/parties/events tables plus indexes.
+- Added `migrate:apply` script (`wrangler d1 migrations apply DB`) to `package.json`.
 
 ### ✅ CHECKPOINT 3
 **Commit:** `feat(api): HTTP router + Turnstile siteverify + KV code map`  
