@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@cloudflare/workers-types": "^4.20251008.0",
     "@types/react": "~19.1.10",
     "@types/react-native": "^0.72.8",
     "babel-preset-expo": "~54.0.3",

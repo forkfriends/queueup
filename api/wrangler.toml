@@ -1,0 +1,24 @@
+name = "queueup-api"
+main = "worker.ts"
+compatibility_date = "2025-10-08"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[durable_objects.bindings]]
+name = "QUEUE_DO"
+class_name = "QueueDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["QueueDO"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "queueup-db"
+database_id = "queueup-db"
+
+[[kv_namespaces]]
+binding = "QUEUE_KV"
+id = "queue-code"
+preview_id = "queue-code-preview"
