@@ -199,12 +199,11 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   const shouldVerify =
     env.TURNSTILE_BYPASS !== 'true' &&
     env.TURNSTILE_SECRET_KEY &&
-    env.TURNSTILE_SECRET_KEY.trim().length > 0;
+    env.TURNSTILE_SECRET_KEY.trim().length > 0 &&
+    typeof turnstileToken === 'string' &&
+    turnstileToken.length > 0;
 
   if (shouldVerify) {
-    if (typeof turnstileToken !== 'string' || !turnstileToken) {
-      return jsonError('turnstileToken is required', 400);
-    }
     const verification = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, remoteIp);
     if (!verification.success) {
       return jsonError('Turnstile verification failed', 400, {
