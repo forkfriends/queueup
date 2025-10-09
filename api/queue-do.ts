@@ -24,6 +24,10 @@ type ConnectionInfo = { role: 'host' } | { role: 'guest'; partyId: string };
 
 const CALL_TIMEOUT_MS = 2 * 60 * 1000;
 
+function logPrefix(sessionId: string, scope: string): string {
+  return `[QueueDO ${sessionId}] ${scope}:`;
+}
+
 export class QueueDO implements DurableObject {
   private readonly sessionId: string;
   private queue: QueueParty[] = [];
@@ -48,6 +52,7 @@ export class QueueDO implements DurableObject {
     const url = new URL(request.url);
 
     if (request.headers.get('Upgrade') === 'websocket' && url.pathname === '/connect') {
+      console.log(logPrefix(this.sessionId, 'fetch'), 'websocket connect request received');
       return this.handleWebSocket(request, url);
     }
 
@@ -308,28 +313,49 @@ export class QueueDO implements DurableObject {
   private async identifyConnection(request: Request, url: URL): Promise<ConnectionInfo | Response> {
     const cookieHeader = request.headers.get('Cookie');
     const hostCookie = this.extractCookie(cookieHeader, HOST_COOKIE_NAME);
+    const headerToken = request.headers.get('x-host-auth');
+    const queryToken = url.searchParams.get('hostToken');
 
-    if (hostCookie) {
-      const valid = await verifyHostCookie(hostCookie, this.sessionId, this.env.HOST_AUTH_SECRET);
+    const triedTokens = [headerToken, hostCookie, queryToken].filter(
+      (token): token is string => Boolean(token)
+    );
+
+    for (const token of triedTokens) {
+      const valid = await verifyHostCookie(token, this.sessionId, this.env.HOST_AUTH_SECRET);
       if (valid) {
+        console.log(logPrefix(this.sessionId, 'identifyConnection'), 'host authenticated via token');
         return { role: 'host' };
       }
     }
 
+    if (triedTokens.length > 0) {
+      console.warn(
+        logPrefix(this.sessionId, 'identifyConnection'),
+        'host authentication failed for provided tokens',
+        triedTokens.map((token) => token.slice(0, 8)).join(',')
+      );
+    } else {
+      console.warn(logPrefix(this.sessionId, 'identifyConnection'), 'no host token provided');
+    }
+
     const partyId = url.searchParams.get('partyId');
     if (!partyId) {
+      console.warn(logPrefix(this.sessionId, 'identifyConnection'), 'guest connect without partyId');
       return new Response('Unauthorized', { status: 401 });
     }
 
     if (!this.findParty(partyId) && (!this.nowServing || this.nowServing.id !== partyId)) {
+      console.warn(logPrefix(this.sessionId, 'identifyConnection'), 'party not found', partyId);
       return new Response('Party not found', { status: 404 });
     }
 
+    console.log(logPrefix(this.sessionId, 'identifyConnection'), 'guest authenticated', partyId);
     return { role: 'guest', partyId };
   }
 
   private registerSocket(socket: WebSocket, info: ConnectionInfo): void {
     this.sockets.set(socket, info);
+    console.log(logPrefix(this.sessionId, 'registerSocket'), 'socket added', info.role);
     socket.addEventListener('message', (event) => this.handleSocketMessage(socket, event));
     socket.addEventListener('close', () => this.unregisterSocket(socket));
     socket.addEventListener('error', () => this.unregisterSocket(socket));
@@ -347,6 +373,7 @@ export class QueueDO implements DurableObject {
       return;
     }
     this.sockets.delete(socket);
+    console.log(logPrefix(this.sessionId, 'unregisterSocket'), 'socket removed', info.role);
 
     if (info.role === 'guest') {
       const set = this.guestSockets.get(info.partyId);
@@ -373,6 +400,7 @@ export class QueueDO implements DurableObject {
 
       if (data.type === 'ping') {
         socket.send(JSON.stringify({ type: 'pong' }));
+        console.log(logPrefix(this.sessionId, 'handleSocketMessage'), 'pong sent to', info.role);
       }
     } catch (error) {
       console.error('WebSocket message error', error);

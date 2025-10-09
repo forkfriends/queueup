@@ -1,0 +1,178 @@
+import { StyleSheet } from 'react-native';
+
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: '#FAF9FA',
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 16,
+  },
+  headerCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    padding: 18,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    gap: 6,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  headerLine: {
+    fontSize: 15,
+    color: '#444',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  statusBadge: {
+    fontSize: 13,
+    fontWeight: '600',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  statusActive: {
+    color: '#0f5132',
+    backgroundColor: '#d1e7dd',
+  },
+  statusClosed: {
+    color: '#842029',
+    backgroundColor: '#f8d7da',
+  },
+  connectionText: {
+    fontSize: 13,
+    color: '#606060',
+  },
+  nowServingCard: {
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dcdcdc',
+    padding: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+    gap: 8,
+  },
+  nowServingHeading: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  nowServingValue: {
+    fontSize: 16,
+  },
+  queueCard: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  queueScroll: {
+    paddingVertical: 8,
+  },
+  queueItem: {
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    gap: 4,
+  },
+  queueItemLast: {
+    borderBottomWidth: 0,
+  },
+  queueItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  queueItemMeta: {
+    fontSize: 13,
+    color: '#606060',
+  },
+  queueActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    paddingTop: 8,
+  },
+  primaryButton: {
+    flex: 1,
+    backgroundColor: '#222',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonDisabled: {
+    backgroundColor: '#999',
+  },
+  destructiveButton: {
+    flex: 1,
+    backgroundColor: '#c1121f',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  queueItemButton: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    backgroundColor: '#1f6feb',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  queueItemButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  emptyState: {
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#777',
+  },
+  reconnectButton: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#bbb',
+  },
+  reconnectButtonText: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '600',
+  },
+});
+
+export default styles;

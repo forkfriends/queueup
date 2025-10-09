@@ -133,6 +133,9 @@ async function handleConnect(request: Request, env: Env, code: string): Promise<
 
   const headers = new Headers(request.headers);
   headers.set('x-session-id', sessionId);
+  if (headers.has('x-host-auth')) {
+    console.log('[worker.handleConnect]', 'forwarding host auth header for session', sessionId);
+  }
 
   const doUrl = new URL(request.url);
   doUrl.pathname = '/connect';

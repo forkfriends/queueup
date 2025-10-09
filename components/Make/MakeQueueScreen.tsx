@@ -26,6 +26,16 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CreateQueueResult | null>(null);
 
+  const openHostControls = () => {
+    if (!result) return;
+    navigation.navigate('HostQueueScreen', {
+      code: result.code,
+      sessionId: result.sessionId,
+      wsUrl: result.wsUrl,
+      hostAuthToken: result.hostAuthToken,
+    });
+  };
+
   const onSubmit = async () => {
     if (loading) return;
     setLoading(true);
@@ -113,11 +123,14 @@ export default function MakeQueueScreen({ navigation }: Props) {
               </Text>
               <Text style={styles.resultLine}>Share join link: {result.joinUrl}</Text>
               <Text style={styles.resultLine}>Session ID: {result.sessionId}</Text>
-              {result.hostAuthCookie ? (
+              {result.hostAuthToken ? (
                 <Text style={styles.resultHint}>
-                  Host cookie stored. Keep this device open to control the queue.
+                  Host credentials stored on this device. Open the host console to advance parties.
                 </Text>
               ) : null}
+              <Pressable style={styles.hostButton} onPress={openHostControls}>
+                <Text style={styles.hostButtonText}>Open Host Console</Text>
+              </Pressable>
             </View>
           ) : null}
         </ScrollView>

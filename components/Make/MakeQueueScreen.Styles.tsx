@@ -81,6 +81,19 @@ const styles = StyleSheet.create({
     color: '#555',
     marginTop: 4,
   },
+  hostButton: {
+    marginTop: 16,
+    backgroundColor: '#1f6feb',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hostButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
 
 export default styles;
