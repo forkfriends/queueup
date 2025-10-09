@@ -188,9 +188,6 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   }
 
   const { name, size, turnstileToken } = payload;
-  if (typeof turnstileToken !== 'string' || !turnstileToken) {
-    return jsonError('turnstileToken is required', 400);
-  }
   if (name !== undefined && typeof name !== 'string') {
     return jsonError('name must be a string', 400);
   }
@@ -199,9 +196,15 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   }
 
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
-  if (env.TURNSTILE_BYPASS === 'true') {
-    // Test bypass: integration tests set TURNSTILE_BYPASS to "true" to avoid external fetches.
-  } else {
+  const shouldVerify =
+    env.TURNSTILE_BYPASS !== 'true' &&
+    env.TURNSTILE_SECRET_KEY &&
+    env.TURNSTILE_SECRET_KEY.trim().length > 0;
+
+  if (shouldVerify) {
+    if (typeof turnstileToken !== 'string' || !turnstileToken) {
+      return jsonError('turnstileToken is required', 400);
+    }
     const verification = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, remoteIp);
     if (!verification.success) {
       return jsonError('Turnstile verification failed', 400, {

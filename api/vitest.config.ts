@@ -6,11 +6,6 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 const wranglerConfigPath = resolve(rootDir, 'wrangler.toml');
 
 export default defineWorkersConfig({
-  resolve: {
-    alias: {
-      'node:worker_threads': resolve(rootDir, 'tests/stubs/worker-threads.ts'),
-    },
-  },
   test: {
     globals: true,
     pool: '@cloudflare/vitest-pool-workers',

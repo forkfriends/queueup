@@ -26,6 +26,7 @@ export default function JoinQueueScreen({ navigation }: Props) {
   const [resultText, setResultText] = useState<string | null>(null);
 
   const onCancel = () => navigation.goBack();
+
   const onSubmit = async () => {
     if (loading) return;
     const trimmed = key.trim().toUpperCase();

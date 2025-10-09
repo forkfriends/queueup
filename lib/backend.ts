@@ -36,7 +36,6 @@ export interface JoinQueueParams {
   code: string;
   name?: string;
   size?: number;
-  turnstileToken?: string;
 }
 
 export interface JoinQueueResult {
@@ -44,16 +43,10 @@ export interface JoinQueueResult {
   position: number;
 }
 
-export async function joinQueue({
-  code,
-  name,
-  size,
-  turnstileToken,
-}: JoinQueueParams): Promise<JoinQueueResult> {
+export async function joinQueue({ code, name, size }: JoinQueueParams): Promise<JoinQueueResult> {
   const payload = {
     name: name?.trim() || undefined,
     size: size && Number.isFinite(size) ? size : undefined,
-    turnstileToken: turnstileToken ?? '1x0000000000000000000000000000000AA',
   };
 
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/join`, {
