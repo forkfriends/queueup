@@ -6,8 +6,10 @@ const DEFAULT_LOCALHOST = Platform.select({
   default: 'http://localhost:8787',
 });
 
-const API_BASE_URL =
-  (process.env.EXPO_PUBLIC_API_BASE_URL ?? DEFAULT_LOCALHOST)?.replace(/\/$/, '') ?? '';
+const rawApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+const apiBaseUrlWithDefault = rawApiBaseUrl ?? DEFAULT_LOCALHOST;
+const apiBaseUrlSanitized = apiBaseUrlWithDefault ? apiBaseUrlWithDefault.replace(/\/$/, '') : '';
+const API_BASE_URL = apiBaseUrlSanitized ?? '';
 
 export interface CreateQueueResult {
   code: string;
