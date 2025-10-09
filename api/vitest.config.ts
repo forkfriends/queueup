@@ -1,44 +1,44 @@
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
-const wranglerConfigPath = resolve(rootDir, "wrangler.toml");
+const wranglerConfigPath = resolve(rootDir, 'wrangler.toml');
 
 export default defineWorkersConfig({
   test: {
     globals: true,
     resolve: {
       alias: {
-        "node:worker_threads": resolve(rootDir, "tests/stubs/worker-threads.ts"),
+        'node:worker_threads': resolve(rootDir, 'tests/stubs/worker-threads.ts'),
       },
     },
     ssr: {
-      noExternal: ["@cloudflare/vitest-pool-workers"],
+      noExternal: ['@cloudflare/vitest-pool-workers'],
     },
-    pool: "@cloudflare/vitest-pool-workers",
+    pool: '@cloudflare/vitest-pool-workers',
     poolOptions: {
       workers: {
-        main: resolve(rootDir, "worker.ts"),
+        main: resolve(rootDir, 'worker.ts'),
         isolatedStorage: false,
         wrangler: {
           configPath: wranglerConfigPath,
         },
         miniflare: {
-          compatibilityDate: "2025-10-08",
+          compatibilityDate: '2025-10-08',
           bindings: {
-            TURNSTILE_SECRET_KEY: "test-secret",
-            HOST_AUTH_SECRET: "test-host-secret",
-            TURNSTILE_BYPASS: "true",
-            TEST_MODE: "true",
-            ALLOWED_ORIGINS: "https://example.com",
+            TURNSTILE_SECRET_KEY: 'test-secret',
+            HOST_AUTH_SECRET: 'test-host-secret',
+            TURNSTILE_BYPASS: 'true',
+            TEST_MODE: 'true',
+            ALLOWED_ORIGINS: 'https://example.com',
           },
-          kvNamespaces: ["QUEUE_KV"],
-          d1Databases: ["DB"],
+          kvNamespaces: ['QUEUE_KV'],
+          d1Databases: ['DB'],
           modules: [
             {
-              type: "CommonJS",
-              path: "node:worker_threads",
+              type: 'CommonJS',
+              path: 'node:worker_threads',
               contents: `
 class FakePort {
   constructor() {
@@ -83,9 +83,9 @@ module.exports = {
       },
     },
     coverage: {
-      reporter: ["text", "json-summary", "html"],
-      provider: "v8",
-      include: ["api/**/*.ts"],
+      reporter: ['text', 'json-summary', 'html'],
+      provider: 'v8',
+      include: ['api/**/*.ts'],
       thresholds: {
         lines: 0,
         functions: 0,
@@ -93,6 +93,6 @@ module.exports = {
         branches: 0,
       },
     },
-    setupFiles: [resolve(rootDir, "tests", "setup.ts")],
+    setupFiles: [resolve(rootDir, 'tests', 'setup.ts')],
   },
 });

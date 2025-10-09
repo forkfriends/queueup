@@ -1,5 +1,5 @@
-import { env, applyD1Migrations } from "cloudflare:test";
-import schemaSql from "../migrations/001_init.sql?raw";
+import { env, applyD1Migrations } from 'cloudflare:test';
+import schemaSql from '../migrations/001_init.sql?raw';
 
 function normalizeQueries(sql: string): string[] {
   return sql
@@ -9,6 +9,4 @@ function normalizeQueries(sql: string): string[] {
     .map((query) => `${query};`);
 }
 
-await applyD1Migrations(env.DB, [
-  { name: "001_init.sql", queries: normalizeQueries(schemaSql) },
-]);
+await applyD1Migrations(env.DB, [{ name: '001_init.sql', queries: normalizeQueries(schemaSql) }]);

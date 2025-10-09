@@ -29,8 +29,7 @@ export default function JoinQueueScreen({ navigation }: Props) {
     <SafeAreaProvider style={styles.safe}>
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', android: undefined })}
-        style={{ flex: 1 }}
-      >
+        style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Join Queue</Text>
 

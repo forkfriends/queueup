@@ -1,15 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { env, SELF, runDurableObjectAlarm } from "cloudflare:test";
+import { describe, expect, it } from 'vitest';
+import { env, SELF, runDurableObjectAlarm } from 'cloudflare:test';
 
 interface QueueUpdateMessage {
-  type: "queue_update";
-  queue: Array<{
+  type: 'queue_update';
+  queue: {
     id: string;
     name?: string;
     size?: number;
     status: string;
     nearby: boolean;
-  }>;
+  }[];
   nowServing: null | {
     id: string;
     status: string;
@@ -17,24 +17,24 @@ interface QueueUpdateMessage {
 }
 
 interface PositionMessage {
-  type: "position";
+  type: 'position';
   position: number;
   aheadCount: number;
 }
 
 type GuestMessage =
   | PositionMessage
-  | { type: "called" }
-  | { type: "removed"; reason: string }
-  | { type: "closed" };
+  | { type: 'called' }
+  | { type: 'removed'; reason: string }
+  | { type: 'closed' };
 
 async function connectWebSocket(path: string, initHeaders?: HeadersInit) {
-  const url = new URL(path, "https://example.com");
+  const url = new URL(path, 'https://example.com');
   const response = await SELF.fetch(url, {
-    method: "GET",
+    method: 'GET',
     headers: {
-      Upgrade: "websocket",
-      Connection: "Upgrade",
+      Upgrade: 'websocket',
+      Connection: 'Upgrade',
       ...initHeaders,
     },
   });
@@ -43,15 +43,15 @@ async function connectWebSocket(path: string, initHeaders?: HeadersInit) {
   }
   const socket = response.webSocket;
   if (!socket) {
-    throw new Error("No WebSocket on response");
+    throw new Error('No WebSocket on response');
   }
   socket.accept();
 
   const queue: unknown[] = [];
-  const resolvers: Array<(value: unknown) => void> = [];
+  const resolvers: ((value: unknown) => void)[] = [];
 
-  socket.addEventListener("message", (event) => {
-    const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+  socket.addEventListener('message', (event) => {
+    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
     if (resolvers.length > 0) {
       const resolve = resolvers.shift()!;
       resolve(data);
@@ -74,25 +74,28 @@ async function connectWebSocket(path: string, initHeaders?: HeadersInit) {
 }
 
 async function fetchJson(path: string, init: RequestInit = {}): Promise<Response> {
-  const url = new URL(path, "https://example.com");
+  const url = new URL(path, 'https://example.com');
   return SELF.fetch(url, init);
 }
 
-describe("queue lifecycle integration", () => {
-  it("supports create, join, real-time updates, alarms, and close flows", async () => {
-    const createResponse = await fetchJson("/api/queue/create", { method: "POST" });
+describe('queue lifecycle integration', () => {
+  it('supports create, join, real-time updates, alarms, and close flows', async () => {
+    const createResponse = await fetchJson('/api/queue/create', { method: 'POST' });
     expect(createResponse.status).toBe(200);
-    const createBody = await createResponse.json<
-      { code: string; sessionId: string; joinUrl: string; wsUrl: string }
-    >();
+    const createBody = await createResponse.json<{
+      code: string;
+      sessionId: string;
+      joinUrl: string;
+      wsUrl: string;
+    }>();
     expect(createBody.code).toMatch(/^[A-Z0-9]{6}$/);
     expect(createBody.sessionId).toBeTruthy();
     const sessionId = createBody.sessionId;
     const shortCode = createBody.code;
 
-    const setCookie = createResponse.headers.get("set-cookie");
+    const setCookie = createResponse.headers.get('set-cookie');
     expect(setCookie).toBeTruthy();
-    const hostCookie = setCookie!.split(";")[0];
+    const hostCookie = setCookie!.split(';')[0];
 
     // Host websocket connection receives initial snapshot.
     const hostWs = await connectWebSocket(`/api/queue/${shortCode}/connect`, {
@@ -100,14 +103,14 @@ describe("queue lifecycle integration", () => {
     });
 
     const hostInitial = await hostWs.waitForMessage<QueueUpdateMessage>();
-    expect(hostInitial.type).toBe("queue_update");
+    expect(hostInitial.type).toBe('queue_update');
     expect(hostInitial.queue.length).toBe(0);
 
     // Guest joins queue.
     const joinResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Alice", size: 2, turnstileToken: "stub-token" }),
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Alice', size: 2, turnstileToken: 'stub-token' }),
     });
     expect(joinResponse.status).toBe(200);
     const joinBody = await joinResponse.json<{ partyId: string; position: number }>();
@@ -117,21 +120,21 @@ describe("queue lifecycle integration", () => {
     const hostAfterJoin = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterJoin.queue.length).toBe(1);
     expect(hostAfterJoin.queue[0].id).toBe(partyId);
-    expect(hostAfterJoin.queue[0].status).toBe("waiting");
+    expect(hostAfterJoin.queue[0].status).toBe('waiting');
 
     // Guest websocket connection receives position updates.
     const guestWs = await connectWebSocket(`/api/queue/${shortCode}/connect?partyId=${partyId}`);
 
     const guestInitial = await guestWs.waitForMessage<GuestMessage>();
-    expect(guestInitial.type).toBe("position");
-    if (guestInitial.type === "position") {
+    expect(guestInitial.type).toBe('position');
+    if (guestInitial.type === 'position') {
       expect(guestInitial.position).toBe(1);
     }
 
     // Guest declares nearby.
     const nearbyResponse = await fetchJson(`/api/queue/${shortCode}/declare-nearby`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ partyId }),
     });
     expect(nearbyResponse.status).toBe(200);
@@ -140,9 +143,9 @@ describe("queue lifecycle integration", () => {
 
     // Host advances queue.
     const advanceResponse = await fetchJson(`/api/queue/${shortCode}/advance`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "content-type": "application/json",
+        'content-type': 'application/json',
         Cookie: hostCookie,
       },
       body: JSON.stringify({}),
@@ -155,7 +158,7 @@ describe("queue lifecycle integration", () => {
     expect(hostAfterAdvance.nowServing?.id).toBe(partyId);
 
     const guestCalled = await guestWs.waitForMessage<GuestMessage>();
-    expect(guestCalled.type).toBe("called");
+    expect(guestCalled.type).toBe('called');
 
     // Alarm should mark the party as no_show and auto-advance.
     const durableId = env.QUEUE_DO.idFromString(sessionId);
@@ -167,22 +170,22 @@ describe("queue lifecycle integration", () => {
     expect(hostAfterAlarm.nowServing).toBeNull();
 
     const guestRemoved = await guestWs.waitForMessage<GuestMessage>();
-    expect(guestRemoved).toEqual({ type: "removed", reason: "no_show" });
+    expect(guestRemoved).toEqual({ type: 'removed', reason: 'no_show' });
 
     // Join a second party to exercise kick + leave flows.
     const secondJoinResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Bob", size: 1, turnstileToken: "stub-token" }),
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Bob', size: 1, turnstileToken: 'stub-token' }),
     });
     const { partyId: secondParty } = await secondJoinResponse.json<{ partyId: string }>();
     await hostWs.waitForMessage<QueueUpdateMessage>(); // queue update with second party
 
     // Kick the second party.
     const kickResponse = await fetchJson(`/api/queue/${shortCode}/kick`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "content-type": "application/json",
+        'content-type': 'application/json',
         Cookie: hostCookie,
       },
       body: JSON.stringify({ partyId: secondParty }),
@@ -193,7 +196,7 @@ describe("queue lifecycle integration", () => {
 
     // Close the session.
     const closeResponse = await fetchJson(`/api/queue/${shortCode}/close`, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Cookie: hostCookie,
       },
@@ -204,20 +207,20 @@ describe("queue lifecycle integration", () => {
     expect(postCloseUpdate.nowServing).toBeNull();
 
     const closedMessage = await hostWs.waitForMessage<GuestMessage>();
-    expect(closedMessage).toEqual({ type: "closed" });
+    expect(closedMessage).toEqual({ type: 'closed' });
 
     const eventCount = await env.DB.prepare<{ count: number }>(
-      "SELECT COUNT(*) as count FROM events WHERE session_id = ?1"
+      'SELECT COUNT(*) as count FROM events WHERE session_id = ?1'
     )
       .bind(sessionId)
       .first();
     expect((eventCount?.count ?? 0) >= 4).toBe(true);
 
     try {
-      hostWs.clientSocket.close(1000, "done");
+      hostWs.clientSocket.close(1000, 'done');
     } catch {}
     try {
-      guestWs.clientSocket.close(1000, "done");
+      guestWs.clientSocket.close(1000, 'done');
     } catch {}
   }, 20000);
 });

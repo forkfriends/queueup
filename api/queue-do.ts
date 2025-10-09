@@ -1,8 +1,8 @@
-import type { Env } from "./worker";
-import { HOST_COOKIE_NAME, verifyHostCookie } from "./utils/auth";
+import type { Env } from './worker';
+import { HOST_COOKIE_NAME, verifyHostCookie } from './utils/auth';
 
-type QueueStatus = "waiting" | "called";
-type PartyRemovalReason = "served" | "left" | "kicked" | "no_show" | "closed";
+type QueueStatus = 'waiting' | 'called';
+type PartyRemovalReason = 'served' | 'left' | 'kicked' | 'no_show' | 'closed';
 
 interface QueueParty {
   id: string;
@@ -20,9 +20,7 @@ interface StoredState {
   pendingPartyId?: string | null;
 }
 
-type ConnectionInfo =
-  | { role: "host" }
-  | { role: "guest"; partyId: string };
+type ConnectionInfo = { role: 'host' } | { role: 'guest'; partyId: string };
 
 const CALL_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -36,7 +34,10 @@ export class QueueDO implements DurableObject {
   private sockets = new Map<WebSocket, ConnectionInfo>();
   private guestSockets = new Map<string, Set<WebSocket>>();
 
-  constructor(private readonly state: DurableObjectState, private readonly env: Env) {
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: Env
+  ) {
     this.sessionId = state.id.toString();
     this.state.blockConcurrencyWhile(async () => {
       await this.restoreState();
@@ -46,29 +47,29 @@ export class QueueDO implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (request.headers.get("Upgrade") === "websocket" && url.pathname === "/connect") {
+    if (request.headers.get('Upgrade') === 'websocket' && url.pathname === '/connect') {
       return this.handleWebSocket(request, url);
     }
 
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
+    if (request.method !== 'POST') {
+      return new Response('Method not allowed', { status: 405 });
     }
 
     switch (url.pathname) {
-      case "/join":
+      case '/join':
         return this.handleJoin(request);
-      case "/declare-nearby":
+      case '/declare-nearby':
         return this.handleDeclareNearby(request);
-      case "/leave":
+      case '/leave':
         return this.handleLeave(request);
-      case "/advance":
+      case '/advance':
         return this.handleAdvance(request);
-      case "/kick":
+      case '/kick':
         return this.handleKick(request);
-      case "/close":
+      case '/close':
         return this.handleClose(request);
       default:
-        return new Response("Not found", { status: 404 });
+        return new Response('Not found', { status: 404 });
     }
   }
 
@@ -83,27 +84,27 @@ export class QueueDO implements DurableObject {
 
   private async handleJoin(request: Request): Promise<Response> {
     if (this.closed) {
-      return this.jsonError("Session closed", 409);
+      return this.jsonError('Session closed', 409);
     }
 
     const payload = await this.readJson(request);
     if (!payload) {
-      return this.jsonError("Invalid JSON body", 400);
+      return this.jsonError('Invalid JSON body', 400);
     }
 
     const { name, size } = payload;
-    if (name !== undefined && typeof name !== "string") {
-      return this.jsonError("name must be a string", 400);
+    if (name !== undefined && typeof name !== 'string') {
+      return this.jsonError('name must be a string', 400);
     }
     if (size !== undefined && (!Number.isInteger(size) || size <= 0)) {
-      return this.jsonError("size must be a positive integer", 400);
+      return this.jsonError('size must be a positive integer', 400);
     }
 
     const party: QueueParty = {
       id: crypto.randomUUID(),
       name,
       size,
-      status: "waiting",
+      status: 'waiting',
       nearby: false,
       joinedAt: Date.now(),
     };
@@ -116,15 +117,19 @@ export class QueueDO implements DurableObject {
       ).bind(party.id, this.sessionId, name ?? null, size ?? null),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'joined', ?3)"
-      ).bind(this.sessionId, party.id, JSON.stringify({ name: party.name ?? null, size: party.size ?? null })),
+      ).bind(
+        this.sessionId,
+        party.id,
+        JSON.stringify({ name: party.name ?? null, size: party.size ?? null })
+      ),
     ];
 
     const results = await this.env.DB.batch(statements);
     const errorResult = results.find((result) => result.error);
     if (errorResult) {
       this.queue.pop();
-      console.error("Failed to persist join:", errorResult.error);
-      return this.jsonError("Failed to join queue", 500);
+      console.error('Failed to persist join:', errorResult.error);
+      return this.jsonError('Failed to join queue', 500);
     }
 
     await this.persistState();
@@ -141,23 +146,21 @@ export class QueueDO implements DurableObject {
   private async handleDeclareNearby(request: Request): Promise<Response> {
     const payload = await this.readJson(request);
     if (!payload) {
-      return this.jsonError("Invalid JSON body", 400);
+      return this.jsonError('Invalid JSON body', 400);
     }
     const { partyId } = payload;
-    if (typeof partyId !== "string" || !partyId) {
-      return this.jsonError("partyId is required", 400);
+    if (typeof partyId !== 'string' || !partyId) {
+      return this.jsonError('partyId is required', 400);
     }
 
     const party = this.findParty(partyId);
     if (!party) {
-      return this.jsonError("Party not found", 404);
+      return this.jsonError('Party not found', 404);
     }
 
     if (!party.nearby) {
       party.nearby = true;
-      await this.env.DB.prepare("UPDATE parties SET nearby = 1 WHERE id = ?1")
-        .bind(partyId)
-        .run();
+      await this.env.DB.prepare('UPDATE parties SET nearby = 1 WHERE id = ?1').bind(partyId).run();
       await this.persistState();
       this.broadcastHostSnapshot();
     }
@@ -168,23 +171,23 @@ export class QueueDO implements DurableObject {
   private async handleLeave(request: Request): Promise<Response> {
     const payload = await this.readJson(request);
     if (!payload) {
-      return this.jsonError("Invalid JSON body", 400);
+      return this.jsonError('Invalid JSON body', 400);
     }
     const { partyId } = payload;
-    if (typeof partyId !== "string" || !partyId) {
-      return this.jsonError("partyId is required", 400);
+    if (typeof partyId !== 'string' || !partyId) {
+      return this.jsonError('partyId is required', 400);
     }
 
-    const removed = await this.removeParty(partyId, "left");
+    const removed = await this.removeParty(partyId, 'left');
     if (!removed) {
-      return this.jsonError("Party not found", 404);
+      return this.jsonError('Party not found', 404);
     }
 
     await this.env.DB.batch([
       this.env.DB.prepare("UPDATE parties SET status = 'left' WHERE id = ?1").bind(partyId),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'left', ?3)"
-      ).bind(this.sessionId, partyId, JSON.stringify({ reason: "guest_left" })),
+      ).bind(this.sessionId, partyId, JSON.stringify({ reason: 'guest_left' })),
     ]);
 
     return this.jsonResponse({ ok: true });
@@ -198,24 +201,24 @@ export class QueueDO implements DurableObject {
 
     const payload = await this.readJson(request);
     if (!payload) {
-      return this.jsonError("Invalid JSON body", 400);
+      return this.jsonError('Invalid JSON body', 400);
     }
 
     const { partyId } = payload;
-    if (typeof partyId !== "string" || !partyId) {
-      return this.jsonError("partyId is required", 400);
+    if (typeof partyId !== 'string' || !partyId) {
+      return this.jsonError('partyId is required', 400);
     }
 
-    const removed = await this.removeParty(partyId, "kicked");
+    const removed = await this.removeParty(partyId, 'kicked');
     if (!removed) {
-      return this.jsonError("Party not found", 404);
+      return this.jsonError('Party not found', 404);
     }
 
     await this.env.DB.batch([
       this.env.DB.prepare("UPDATE parties SET status = 'left' WHERE id = ?1").bind(partyId),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'left', ?3)"
-      ).bind(this.sessionId, partyId, JSON.stringify({ reason: "kicked" })),
+      ).bind(this.sessionId, partyId, JSON.stringify({ reason: 'kicked' })),
     ]);
 
     return this.jsonResponse({ ok: true });
@@ -255,7 +258,9 @@ export class QueueDO implements DurableObject {
     this.pendingPartyId = null;
 
     await this.env.DB.batch([
-      this.env.DB.prepare("UPDATE sessions SET status = 'closed' WHERE id = ?1").bind(this.sessionId),
+      this.env.DB.prepare("UPDATE sessions SET status = 'closed' WHERE id = ?1").bind(
+        this.sessionId
+      ),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, type, details) VALUES (?1, 'close', NULL)"
       ).bind(this.sessionId),
@@ -281,7 +286,7 @@ export class QueueDO implements DurableObject {
     server.accept();
     this.registerSocket(server, connectionInfo);
 
-    if (connectionInfo.role === "host") {
+    if (connectionInfo.role === 'host') {
       this.sendHostSnapshot(server);
     } else {
       this.sendGuestInitialState(server, connectionInfo.partyId);
@@ -301,35 +306,35 @@ export class QueueDO implements DurableObject {
   }
 
   private async identifyConnection(request: Request, url: URL): Promise<ConnectionInfo | Response> {
-    const cookieHeader = request.headers.get("Cookie");
+    const cookieHeader = request.headers.get('Cookie');
     const hostCookie = this.extractCookie(cookieHeader, HOST_COOKIE_NAME);
 
     if (hostCookie) {
       const valid = await verifyHostCookie(hostCookie, this.sessionId, this.env.HOST_AUTH_SECRET);
       if (valid) {
-        return { role: "host" };
+        return { role: 'host' };
       }
     }
 
-    const partyId = url.searchParams.get("partyId");
+    const partyId = url.searchParams.get('partyId');
     if (!partyId) {
-      return new Response("Unauthorized", { status: 401 });
+      return new Response('Unauthorized', { status: 401 });
     }
 
     if (!this.findParty(partyId) && (!this.nowServing || this.nowServing.id !== partyId)) {
-      return new Response("Party not found", { status: 404 });
+      return new Response('Party not found', { status: 404 });
     }
 
-    return { role: "guest", partyId };
+    return { role: 'guest', partyId };
   }
 
   private registerSocket(socket: WebSocket, info: ConnectionInfo): void {
     this.sockets.set(socket, info);
-    socket.addEventListener("message", (event) => this.handleSocketMessage(socket, event));
-    socket.addEventListener("close", () => this.unregisterSocket(socket));
-    socket.addEventListener("error", () => this.unregisterSocket(socket));
+    socket.addEventListener('message', (event) => this.handleSocketMessage(socket, event));
+    socket.addEventListener('close', () => this.unregisterSocket(socket));
+    socket.addEventListener('error', () => this.unregisterSocket(socket));
 
-    if (info.role === "guest") {
+    if (info.role === 'guest') {
       const set = this.guestSockets.get(info.partyId) ?? new Set<WebSocket>();
       set.add(socket);
       this.guestSockets.set(info.partyId, set);
@@ -343,7 +348,7 @@ export class QueueDO implements DurableObject {
     }
     this.sockets.delete(socket);
 
-    if (info.role === "guest") {
+    if (info.role === 'guest') {
       const set = this.guestSockets.get(info.partyId);
       if (set) {
         set.delete(socket);
@@ -361,16 +366,16 @@ export class QueueDO implements DurableObject {
     }
 
     try {
-      const data = typeof event.data === "string" ? JSON.parse(event.data) : null;
+      const data = typeof event.data === 'string' ? JSON.parse(event.data) : null;
       if (!data) {
         return;
       }
 
-      if (data.type === "ping") {
-        socket.send(JSON.stringify({ type: "pong" }));
+      if (data.type === 'ping') {
+        socket.send(JSON.stringify({ type: 'pong' }));
       }
     } catch (error) {
-      console.error("WebSocket message error", error);
+      console.error('WebSocket message error', error);
     }
   }
 
@@ -380,17 +385,19 @@ export class QueueDO implements DurableObject {
   ): Promise<Response | { nowServing: QueueParty | null }> {
     if (servedPartyId) {
       if (!this.nowServing || this.nowServing.id !== servedPartyId) {
-        return this.jsonError("servedParty does not match current", 400);
+        return this.jsonError('servedParty does not match current', 400);
       }
 
       await this.env.DB.batch([
-        this.env.DB.prepare("UPDATE parties SET status = 'served' WHERE id = ?1").bind(servedPartyId),
+        this.env.DB.prepare("UPDATE parties SET status = 'served' WHERE id = ?1").bind(
+          servedPartyId
+        ),
         this.env.DB.prepare(
           "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'advanced', ?3)"
-        ).bind(this.sessionId, servedPartyId, JSON.stringify({ action: "served" })),
+        ).bind(this.sessionId, servedPartyId, JSON.stringify({ action: 'served' })),
       ]);
 
-      this.notifyGuestRemoval(servedPartyId, "served");
+      this.notifyGuestRemoval(servedPartyId, 'served');
       this.nowServing = null;
       this.pendingPartyId = null;
       await this.state.storage.deleteAlarm();
@@ -400,7 +407,7 @@ export class QueueDO implements DurableObject {
     if (nextPartyId) {
       const index = this.queue.findIndex((entry) => entry.id === nextPartyId);
       if (index === -1) {
-        return this.jsonError("nextParty not found in queue", 404);
+        return this.jsonError('nextParty not found in queue', 404);
       }
       selectedParty = this.queue.splice(index, 1)[0];
     } else if (this.queue.length > 0) {
@@ -408,15 +415,17 @@ export class QueueDO implements DurableObject {
     }
 
     if (selectedParty) {
-      selectedParty.status = "called";
+      selectedParty.status = 'called';
       this.nowServing = selectedParty;
       this.pendingPartyId = selectedParty.id;
 
       await this.env.DB.batch([
-        this.env.DB.prepare("UPDATE parties SET status = 'called' WHERE id = ?1").bind(selectedParty.id),
+        this.env.DB.prepare("UPDATE parties SET status = 'called' WHERE id = ?1").bind(
+          selectedParty.id
+        ),
         this.env.DB.prepare(
           "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'advanced', ?3)"
-        ).bind(this.sessionId, selectedParty.id, JSON.stringify({ action: "called" })),
+        ).bind(this.sessionId, selectedParty.id, JSON.stringify({ action: 'called' })),
       ]);
 
       await this.state.storage.setAlarm(Date.now() + CALL_TIMEOUT_MS);
@@ -439,7 +448,7 @@ export class QueueDO implements DurableObject {
   private async callNextParty(): Promise<void> {
     const result = await this.advanceQueue(undefined, undefined);
     if (result instanceof Response) {
-      console.error("Failed to auto-advance queue via alarm");
+      console.error('Failed to auto-advance queue via alarm');
     }
   }
 
@@ -455,7 +464,7 @@ export class QueueDO implements DurableObject {
       ).bind(this.sessionId, partyId),
     ]);
 
-    this.notifyGuestRemoval(partyId, "no_show");
+    this.notifyGuestRemoval(partyId, 'no_show');
     this.nowServing = null;
     this.pendingPartyId = null;
     await this.persistState();
@@ -483,14 +492,16 @@ export class QueueDO implements DurableObject {
   }
 
   private async verifyHostRequest(request: Request): Promise<true | Response> {
-    const token = request.headers.get("x-host-auth") ?? this.extractCookie(request.headers.get("Cookie"), HOST_COOKIE_NAME);
+    const token =
+      request.headers.get('x-host-auth') ??
+      this.extractCookie(request.headers.get('Cookie'), HOST_COOKIE_NAME);
     if (!token) {
-      return this.jsonError("Host authentication required", 401);
+      return this.jsonError('Host authentication required', 401);
     }
 
     const valid = await verifyHostCookie(token, this.sessionId, this.env.HOST_AUTH_SECRET);
     if (!valid) {
-      return this.jsonError("Invalid host authentication", 403);
+      return this.jsonError('Invalid host authentication', 403);
     }
 
     return true;
@@ -498,13 +509,13 @@ export class QueueDO implements DurableObject {
 
   private broadcastHostSnapshot(): void {
     const message = JSON.stringify({
-      type: "queue_update",
+      type: 'queue_update',
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
     });
 
     for (const [socket, info] of this.sockets.entries()) {
-      if (info.role === "host") {
+      if (info.role === 'host') {
         this.safeSend(socket, message);
       }
     }
@@ -517,7 +528,7 @@ export class QueueDO implements DurableObject {
       }
       const { position, aheadCount } = this.computePosition(partyId);
       const message = JSON.stringify({
-        type: "position",
+        type: 'position',
         position,
         aheadCount,
       });
@@ -530,7 +541,7 @@ export class QueueDO implements DurableObject {
   private notifyGuestCalled(partyId: string): void {
     const sockets = this.guestSockets.get(partyId);
     if (!sockets) return;
-    const message = JSON.stringify({ type: "called" });
+    const message = JSON.stringify({ type: 'called' });
     for (const socket of sockets) {
       this.safeSend(socket, message);
     }
@@ -539,26 +550,26 @@ export class QueueDO implements DurableObject {
   private notifyGuestRemoval(partyId: string, reason: PartyRemovalReason): void {
     const sockets = this.guestSockets.get(partyId);
     if (!sockets) return;
-    const message = JSON.stringify({ type: "removed", reason });
+    const message = JSON.stringify({ type: 'removed', reason });
     for (const socket of sockets) {
       this.safeSend(socket, message);
       try {
         socket.close(1000, reason);
       } catch (error) {
-        console.error("Failed to close guest socket", error);
+        console.error('Failed to close guest socket', error);
       }
     }
     this.guestSockets.delete(partyId);
   }
 
   private notifyAllGuestsClosed(): void {
-    const message = JSON.stringify({ type: "closed" });
+    const message = JSON.stringify({ type: 'closed' });
     for (const [socket] of this.sockets.entries()) {
       this.safeSend(socket, message);
       try {
-        socket.close(1000, "closed");
+        socket.close(1000, 'closed');
       } catch (error) {
-        console.error("Failed to close socket on session close", error);
+        console.error('Failed to close socket on session close', error);
       }
     }
     this.sockets.clear();
@@ -567,7 +578,7 @@ export class QueueDO implements DurableObject {
 
   private sendHostSnapshot(socket: WebSocket): void {
     const message = JSON.stringify({
-      type: "queue_update",
+      type: 'queue_update',
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
     });
@@ -576,24 +587,24 @@ export class QueueDO implements DurableObject {
 
   private sendGuestInitialState(socket: WebSocket, partyId: string): void {
     if (this.closed) {
-      this.safeSend(socket, JSON.stringify({ type: "closed" }));
-      socket.close(1000, "closed");
+      this.safeSend(socket, JSON.stringify({ type: 'closed' }));
+      socket.close(1000, 'closed');
       return;
     }
 
     if (this.nowServing && this.nowServing.id === partyId) {
-      this.safeSend(socket, JSON.stringify({ type: "called" }));
+      this.safeSend(socket, JSON.stringify({ type: 'called' }));
       return;
     }
 
     if (!this.findParty(partyId)) {
-      this.safeSend(socket, JSON.stringify({ type: "removed", reason: "served" }));
-      socket.close(1000, "served");
+      this.safeSend(socket, JSON.stringify({ type: 'removed', reason: 'served' }));
+      socket.close(1000, 'served');
       return;
     }
 
     const { position, aheadCount } = this.computePosition(partyId);
-    this.safeSend(socket, JSON.stringify({ type: "position", position, aheadCount }));
+    this.safeSend(socket, JSON.stringify({ type: 'position', position, aheadCount }));
   }
 
   private computePosition(partyId: string): { position: number; aheadCount: number } {
@@ -606,7 +617,7 @@ export class QueueDO implements DurableObject {
     };
   }
 
-  private toHostParty(party: QueueParty): Omit<QueueParty, "joinedAt"> & { joinedAt: number } {
+  private toHostParty(party: QueueParty): Omit<QueueParty, 'joinedAt'> & { joinedAt: number } {
     return {
       id: party.id,
       name: party.name,
@@ -625,15 +636,15 @@ export class QueueDO implements DurableObject {
   }
 
   private async restoreState(): Promise<void> {
-    const stored = await this.state.storage.get<StoredState>("state");
+    const stored = await this.state.storage.get<StoredState>('state');
     if (stored) {
       this.queue = (stored.queue ?? []).map((entry) => ({
         ...entry,
-        status: entry.status ?? "waiting",
+        status: entry.status ?? 'waiting',
       }));
       this.nowServing = stored.nowServing ?? null;
       if (this.nowServing) {
-        this.nowServing.status = "called";
+        this.nowServing.status = 'called';
       }
       this.closed = stored.closed ?? false;
       this.pendingPartyId = stored.pendingPartyId ?? (this.nowServing ? this.nowServing.id : null);
@@ -645,26 +656,24 @@ export class QueueDO implements DurableObject {
   }
 
   private async loadFromDatabase(): Promise<void> {
-    const sessionRow = await this.env.DB.prepare("SELECT status FROM sessions WHERE id = ?1")
+    const sessionRow = await this.env.DB.prepare('SELECT status FROM sessions WHERE id = ?1')
       .bind(this.sessionId)
       .first<{ status: string }>();
 
-    this.closed = sessionRow?.status === "closed";
+    this.closed = sessionRow?.status === 'closed';
 
     const { results } = await this.env.DB.prepare(
       "SELECT id, name, size, joined_at, status, nearby FROM parties WHERE session_id = ?1 AND status IN ('waiting','called') ORDER BY joined_at ASC"
     )
       .bind(this.sessionId)
-      .all<
-        {
-          id: string;
-          name?: string | null;
-          size?: number | null;
-          joined_at: number | null;
-          status: string;
-          nearby: number;
-        }
-      >();
+      .all<{
+        id: string;
+        name?: string | null;
+        size?: number | null;
+        joined_at: number | null;
+        status: string;
+        nearby: number;
+      }>();
 
     this.queue = [];
     this.nowServing = null;
@@ -674,11 +683,11 @@ export class QueueDO implements DurableObject {
           id: row.id,
           name: row.name ?? undefined,
           size: row.size ?? undefined,
-          status: row.status === "called" ? "called" : "waiting",
+          status: row.status === 'called' ? 'called' : 'waiting',
           nearby: row.nearby === 1,
           joinedAt: (row.joined_at ?? Math.floor(Date.now() / 1000)) * 1000,
         };
-        if (party.status === "called") {
+        if (party.status === 'called') {
           this.nowServing = party;
           this.pendingPartyId = party.id;
         } else {
@@ -689,7 +698,7 @@ export class QueueDO implements DurableObject {
   }
 
   private async persistState(): Promise<void> {
-    await this.state.storage.put<StoredState>("state", {
+    await this.state.storage.put<StoredState>('state', {
       queue: this.queue,
       nowServing: this.nowServing,
       closed: this.closed,
@@ -708,7 +717,7 @@ export class QueueDO implements DurableObject {
   private jsonResponse(data: unknown, status = 200): Response {
     return new Response(JSON.stringify(data), {
       status,
-      headers: { "content-type": "application/json" },
+      headers: { 'content-type': 'application/json' },
     });
   }
 
@@ -718,11 +727,11 @@ export class QueueDO implements DurableObject {
 
   private extractCookie(header: string | null, name: string): string | null {
     if (!header) return null;
-    const parts = header.split(";");
+    const parts = header.split(';');
     for (const part of parts) {
-      const [cookieName, ...rest] = part.trim().split("=");
+      const [cookieName, ...rest] = part.trim().split('=');
       if (cookieName === name) {
-        return rest.join("=");
+        return rest.join('=');
       }
     }
     return null;
@@ -731,12 +740,12 @@ export class QueueDO implements DurableObject {
   private safeSend(socket: WebSocket, data: string): void {
     try {
       const readyState = (socket as any).readyState;
-      if (typeof readyState === "number" && readyState >= 2) {
+      if (typeof readyState === 'number' && readyState >= 2) {
         return;
       }
       socket.send(data);
     } catch (error) {
-      console.error("Failed to send WebSocket message", error);
+      console.error('Failed to send WebSocket message', error);
       this.unregisterSocket(socket);
     }
   }
