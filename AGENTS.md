@@ -178,7 +178,7 @@ Use **conventional commits**. Create small, reviewable PRs.
 
 ### ✅ CHECKPOINT 6
 **Commit:** `ci: add GitHub Actions (ci, e2e, deploy)`  
-**Do:** Add three workflows (edit paths if repo differs):
+**Delivered:** Added `.github/workflows/ci.yml`, `e2e.yml`, `deploy.yml` running Node 20 with cached npm installs. CI runs lint/typecheck/tests, scheduled E2E placeholder hooks `npm run test:e2e --if-present`, and deploy uses `npx wrangler deploy --config api/wrangler.toml` behind `CF_API_TOKEN`/`CF_ACCOUNT_ID` secrets.
 ```yaml
 # .github/workflows/ci.yml
 name: CI
