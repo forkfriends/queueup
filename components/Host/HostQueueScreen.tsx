@@ -159,7 +159,7 @@ export default function HostQueueScreen({ route }: Props) {
       setConnectionState('closed');
        setConnectionError(
         'Missing host authentication. Reopen the host controls on the device that created this queue.'
-      );
+       );
       return;
     }
     connect();
