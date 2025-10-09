@@ -50,7 +50,7 @@ async function connectWebSocket(path: string, initHeaders?: HeadersInit) {
   const queue: unknown[] = [];
   const resolvers: ((value: unknown) => void)[] = [];
 
-  socket.addEventListener('message', (event) => {
+  socket.addEventListener('message', (event: MessageEvent) => {
     const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
     if (resolvers.length > 0) {
       const resolve = resolvers.shift()!;
@@ -216,11 +216,7 @@ describe('queue lifecycle integration', () => {
       .first();
     expect((eventCount?.count ?? 0) >= 4).toBe(true);
 
-    try {
-      hostWs.clientSocket.close(1000, 'done');
-    } catch {}
-    try {
-      guestWs.clientSocket.close(1000, 'done');
-    } catch {}
+    hostWs.socket.close(1000, 'done');
+    guestWs.socket.close(1000, 'done');
   }, 20000);
 });

@@ -238,11 +238,7 @@ jobs:
 
 ### ✅ CHECKPOINT 7
 **Commit:** `docs: add API.md, ARCHITECTURE.md, DEPLOYMENT.md, AGENTS.md`  
-**Do:** Write:
-- **API.md** — HTTP endpoints & WS protocol (examples for each).
-- **ARCHITECTURE.md** — DO as queue arbiter, WS fan‑out, D1 persistence, KV routing, Cron & Alarms, free‑tier notes.
-- **DEPLOYMENT.md** — KV + D1 creation, secrets (`TURNSTILE_SECRET_KEY`, `HOST_AUTH_SECRET`), `wrangler d1 migrations apply`, `wrangler publish` or GH Actions deploy.
-- **AGENTS.md** — this file.
+**Delivered:** Authored API, architecture, and deployment docs capturing HTTP/WebSocket contracts, Durable Object responsibilities, and Cloudflare provisioning steps. README now includes a backend quickstart; this plan file remains the canonical Agent log.
 
 ---
 
