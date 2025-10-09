@@ -4,6 +4,7 @@ import {
   generateHostCookieValue,
   verifyHostCookie,
 } from "./utils/auth";
+export { QueueDO } from "./queue-do";
 
 export interface Env {
   QUEUE_DO: DurableObjectNamespace;
@@ -12,6 +13,8 @@ export interface Env {
   TURNSTILE_SECRET_KEY: string;
   HOST_AUTH_SECRET: string;
   ALLOWED_ORIGINS?: string;
+  TURNSTILE_BYPASS?: string;
+  TEST_MODE?: string;
 }
 
 const ROUTE =
@@ -48,6 +51,9 @@ export default {
 
       if (primary && action === "connect" && request.method === "GET") {
         const response = await handleConnect(request, env, primary);
+        if (response.status === 101) {
+          return response;
+        }
         return applyCors(response, corsOrigin, ["set-cookie"]);
       }
 
@@ -123,7 +129,22 @@ async function handleConnect(request: Request, env: Env, code: string): Promise<
   const headers = new Headers(request.headers);
   headers.set("x-session-id", sessionId);
 
-  const forwardedRequest = new Request(request, { headers });
+  const doUrl = new URL(request.url);
+  doUrl.pathname = "/connect";
+
+  const init: RequestInit = {
+    method: request.method,
+    headers,
+  };
+  const webSocket = (request as any).webSocket;
+  if (webSocket) {
+    (init as any).webSocket = webSocket;
+  }
+  if (request.body !== null && request.body !== undefined) {
+    init.body = request.body as ReadableStream | null;
+  }
+
+  const forwardedRequest = new Request(doUrl.toString(), init);
 
   return stub.fetch(forwardedRequest);
 }
@@ -173,11 +194,15 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   }
 
   const remoteIp = request.headers.get("CF-Connecting-IP") ?? undefined;
-  const verification = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, remoteIp);
-  if (!verification.success) {
-    return jsonError("Turnstile verification failed", 400, {
-      errors: verification["error-codes"] ?? [],
-    });
+  if (env.TURNSTILE_BYPASS === "true") {
+    // Test bypass: integration tests set TURNSTILE_BYPASS to "true" to avoid external fetches.
+  } else {
+    const verification = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, remoteIp);
+    if (!verification.success) {
+      return jsonError("Turnstile verification failed", 400, {
+        errors: verification["error-codes"] ?? [],
+      });
+    }
   }
 
   const body = {

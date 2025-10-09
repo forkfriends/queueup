@@ -11,14 +11,14 @@ class_name = "QueueDO"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["QueueDO"]
+new_sqlite_classes = ["QueueDO"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "queueup-db"
-database_id = "queueup-db"
+database_id = "0f9b67a6-8e4c-4e17-8dc5-6bfddc1d7a63"
 
 [[kv_namespaces]]
 binding = "QUEUE_KV"
-id = "queue-code"
-preview_id = "queue-code-preview"
+id = "ba0c2edfecd14c02904cbc83cd27f634"
+preview_id = "6de7680b67444c6da3323fde8d2e74d5"

@@ -730,6 +730,10 @@ export class QueueDO implements DurableObject {
 
   private safeSend(socket: WebSocket, data: string): void {
     try {
+      const readyState = (socket as any).readyState;
+      if (typeof readyState === "number" && readyState >= 2) {
+        return;
+      }
       socket.send(data);
     } catch (error) {
       console.error("Failed to send WebSocket message", error);

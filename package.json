@@ -9,7 +9,9 @@
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
     "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix && prettier \"**/*.{js,jsx,ts,tsx,json}\" --write",
     "web": "expo start --web",
-    "migrate:apply": "wrangler d1 migrations apply DB"
+    "migrate:apply": "wrangler d1 migrations apply DB",
+    "test": "vitest run --config api/vitest.config.ts",
+    "test:watch": "vitest --config api/vitest.config.ts"
   },
   "dependencies": {
     "@react-navigation/native": "^7.1.18",
@@ -25,9 +27,11 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@cloudflare/vitest-pool-workers": "^0.9.11",
     "@cloudflare/workers-types": "^4.20251008.0",
     "@types/react": "~19.1.10",
     "@types/react-native": "^0.72.8",
+    "@vitest/coverage-v8": "^3.2.4",
     "babel-preset-expo": "~54.0.3",
     "eslint": "^9.25.1",
     "eslint-config-expo": "~10.0.0",
@@ -35,7 +39,9 @@
     "prettier": "^3.2.5",
     "prettier-plugin-tailwindcss": "^0.5.11",
     "tailwindcss": "^3.4.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.42.1"
   },
   "main": "expo/AppEntry",
   "private": true

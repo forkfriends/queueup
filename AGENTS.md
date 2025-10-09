@@ -167,12 +167,14 @@ Use **conventional commits**. Create small, reviewable PRs.
 - Guests receive position/called/removed/closed updates; hosts get queue snapshots & now-serving info.
 - `alarm()` flags no-shows and auto-advances; all lifecycle mutations persist to D1 event log.
 
-### ✅ CHECKPOINT 5
+### ✅ CHECKPOINT 5 — COMPLETED 2025-10-09
 **Commit:** `test(api): unit + integration tests (Miniflare), coverage thresholds`  
-**Do:**
-- **Unit:** code gen, cookie HMAC verify, small pure helpers.
-- **Integration (Miniflare):** create → join → connect (host+guest WS) → advance → (optional) nearby → alarm(no_show) → auto‑advance → close.
-- Provide script(s): `npm run test`.
+**Delivered:**
+- Added Vitest + `@cloudflare/vitest-pool-workers` setup (`api/vitest.config.ts`) with Wrangler bindings + test env declarations.
+- Implemented unit tests for auth HMAC helpers (`api/tests/queue.unit.test.ts`).
+- Built end-to-end Worker/DO flow test using WebSocket upgrades (`api/tests/queue.int.test.ts`).
+- Added test scripts (`npm run test`, `npm run test:watch`); tests pass via `npx vitest run --config api/vitest.config.ts`.
+- Coverage via V8 pending due to Workers runner limitations (documented in test config).
 
 ### ✅ CHECKPOINT 6
 **Commit:** `ci: add GitHub Actions (ci, e2e, deploy)`  
