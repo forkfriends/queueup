@@ -56,6 +56,31 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  resultCard: {
+    marginTop: 24,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#d6d6d6',
+    padding: 18,
+    backgroundColor: '#f7f7f7',
+  },
+  resultHeading: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  resultLine: {
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  resultCode: {
+    fontWeight: '700',
+  },
+  resultHint: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 4,
+  },
 });
 
 export default styles;

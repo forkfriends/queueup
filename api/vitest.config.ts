@@ -11,9 +11,6 @@ export default defineWorkersConfig({
       'node:worker_threads': resolve(rootDir, 'tests/stubs/worker-threads.ts'),
     },
   },
-  ssr: {
-    noExternal: ['@cloudflare/vitest-pool-workers'],
-  },
   test: {
     globals: true,
     pool: '@cloudflare/vitest-pool-workers',

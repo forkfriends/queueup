@@ -29,10 +29,10 @@ All server code lives in `api/`. To run or deploy the worker locally you need Wr
    npm run migrate:apply
    ```
 5. Run the worker locally or deploy:
-   ```sh
-   npx wrangler dev --config api/wrangler.toml   # local dev
-   npx wrangler deploy --config api/wrangler.toml
-   ```
+  ```sh
+  npx wrangler dev --config api/wrangler.toml   # local dev
+  npx wrangler deploy --config api/wrangler.toml
+  ```
 
 ## Testing
 
@@ -43,3 +43,13 @@ npm run test
 ```
 
 This covers both unit helpers and an end-to-end Durable Object flow (queue creation, join, WebSocket fan-out, advance/alarms, close). Use `npm run test:watch` for quick feedback during development.
+
+### Mobile client configuration
+
+Set `EXPO_PUBLIC_API_BASE_URL` in your environment (or `.env`) to the deployed Worker origin, e.g.
+
+```
+EXPO_PUBLIC_API_BASE_URL=https://queueup-api.danielnwachukwu.workers.dev
+```
+
+If unset, the app defaults to `http://localhost:8787` (`127.0.0.1` on iOS simulator, `10.0.2.2` on Android emulator) which matches Wrangler's dev server.
