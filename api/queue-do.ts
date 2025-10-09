@@ -316,14 +316,17 @@ export class QueueDO implements DurableObject {
     const headerToken = request.headers.get('x-host-auth');
     const queryToken = url.searchParams.get('hostToken');
 
-    const triedTokens = [headerToken, hostCookie, queryToken].filter(
-      (token): token is string => Boolean(token)
+    const triedTokens = [headerToken, hostCookie, queryToken].filter((token): token is string =>
+      Boolean(token)
     );
 
     for (const token of triedTokens) {
       const valid = await verifyHostCookie(token, this.sessionId, this.env.HOST_AUTH_SECRET);
       if (valid) {
-        console.log(logPrefix(this.sessionId, 'identifyConnection'), 'host authenticated via token');
+        console.log(
+          logPrefix(this.sessionId, 'identifyConnection'),
+          'host authenticated via token'
+        );
         return { role: 'host' };
       }
     }
@@ -340,7 +343,10 @@ export class QueueDO implements DurableObject {
 
     const partyId = url.searchParams.get('partyId');
     if (!partyId) {
-      console.warn(logPrefix(this.sessionId, 'identifyConnection'), 'guest connect without partyId');
+      console.warn(
+        logPrefix(this.sessionId, 'identifyConnection'),
+        'guest connect without partyId'
+      );
       return new Response('Unauthorized', { status: 401 });
     }
 

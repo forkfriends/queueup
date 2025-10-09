@@ -244,9 +244,7 @@ export default function JoinQueueScreen({ navigation }: Props) {
           {resultText ? (
             <View style={styles.resultCard}>
               <Text style={styles.resultText}>{resultText}</Text>
-              <Text style={styles.resultHint}>
-                {connectionLabel}
-              </Text>
+              <Text style={styles.resultHint}>{connectionLabel}</Text>
             </View>
           ) : null}
         </ScrollView>

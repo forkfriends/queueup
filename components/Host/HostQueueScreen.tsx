@@ -68,33 +68,30 @@ export default function HostQueueScreen({ route }: Props) {
     }
   }, []);
 
-  const handleMessage = useCallback(
-    (event: MessageEvent) => {
-      if (typeof event.data !== 'string') {
-        return;
-      }
-      try {
-        const parsed = JSON.parse(event.data) as HostMessage;
-        if (parsed.type === 'queue_update') {
-          const queueEntries = Array.isArray(parsed.queue) ? parsed.queue : [];
-          const serving = parsed.nowServing ?? null;
-          setQueue(queueEntries);
-          setNowServing(serving);
-          if (queueEntries.length > 0 || serving) {
-            setClosed(false);
-          }
-          setConnectionError(null);
-        } else if (parsed.type === 'closed') {
-          setQueue([]);
-          setNowServing(null);
-          setClosed(true);
+  const handleMessage = useCallback((event: MessageEvent) => {
+    if (typeof event.data !== 'string') {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(event.data) as HostMessage;
+      if (parsed.type === 'queue_update') {
+        const queueEntries = Array.isArray(parsed.queue) ? parsed.queue : [];
+        const serving = parsed.nowServing ?? null;
+        setQueue(queueEntries);
+        setNowServing(serving);
+        if (queueEntries.length > 0 || serving) {
+          setClosed(false);
         }
-      } catch {
-        // ignore malformed payloads
+        setConnectionError(null);
+      } else if (parsed.type === 'closed') {
+        setQueue([]);
+        setNowServing(null);
+        setClosed(true);
       }
-    },
-    []
-  );
+    } catch {
+      // ignore malformed payloads
+    }
+  }, []);
 
   const connect = useCallback(() => {
     if (!hasHostAuth) {
@@ -157,7 +154,7 @@ export default function HostQueueScreen({ route }: Props) {
   useEffect(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
-       setConnectionError(
+      setConnectionError(
         'Missing host authentication. Reopen the host controls on the device that created this queue.'
        );
       return;
@@ -174,8 +171,8 @@ export default function HostQueueScreen({ route }: Props) {
     connectionState === 'open'
       ? 'Live'
       : connectionState === 'connecting'
-      ? 'Connecting…'
-      : 'Disconnected';
+        ? 'Connecting…'
+        : 'Disconnected';
 
   const disabledAdvance =
     !hasHostAuth || actionLoading || closeLoading || closed || (queueCount === 0 && !nowServing);
@@ -272,9 +269,7 @@ export default function HostQueueScreen({ route }: Props) {
     return queue.map((party, index) => {
       const isLast = index === queueCount - 1;
       return (
-        <View
-          key={party.id}
-          style={[styles.queueItem, isLast ? styles.queueItemLast : undefined]}>
+        <View key={party.id} style={[styles.queueItem, isLast ? styles.queueItemLast : undefined]}>
           <Text style={styles.queueItemName}>
             {party.name?.trim() || 'Guest'} {party.size ? `(${party.size})` : ''}
           </Text>
@@ -305,16 +300,10 @@ export default function HostQueueScreen({ route }: Props) {
           <Text style={styles.headerLine}>Queue code: {code}</Text>
           <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
           <View style={styles.statusRow}>
-            <Text
-              style={[
-                styles.statusBadge,
-                closed ? styles.statusClosed : styles.statusActive,
-              ]}>
+            <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
               {closed ? 'Closed' : 'Active'}
             </Text>
-            <Text style={styles.connectionText}>
-              Connection: {connectionLabel}
-            </Text>
+            <Text style={styles.connectionText}>Connection: {connectionLabel}</Text>
           </View>
           {connectionError ? (
             <>
