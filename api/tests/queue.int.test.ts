@@ -28,7 +28,10 @@ type GuestMessage =
   | { type: 'removed'; reason: string }
   | { type: 'closed' };
 
-async function connectWebSocket(path: string, initHeaders?: HeadersInit) {
+async function connectWebSocket(
+  path: string,
+  initHeaders?: HeadersInit
+): Promise<{ socket: WebSocket; waitForMessage: <T = unknown>() => Promise<T> }> {
   const url = new URL(path, 'https://example.com');
   const response = await SELF.fetch(url, {
     method: 'GET',
@@ -209,12 +212,13 @@ describe('queue lifecycle integration', () => {
     const closedMessage = await hostWs.waitForMessage<GuestMessage>();
     expect(closedMessage).toEqual({ type: 'closed' });
 
-    const eventCount = await env.DB.prepare<{ count: number }>(
+    const eventRow = await env.DB.prepare(
       'SELECT COUNT(*) as count FROM events WHERE session_id = ?1'
     )
       .bind(sessionId)
       .first();
-    expect((eventCount?.count ?? 0) >= 4).toBe(true);
+    const totalEvents = (eventRow as { count: number } | null)?.count ?? 0;
+    expect(totalEvents >= 4).toBe(true);
 
     hostWs.socket.close(1000, 'done');
     guestWs.socket.close(1000, 'done');
