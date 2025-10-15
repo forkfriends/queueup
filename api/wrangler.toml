@@ -2,6 +2,9 @@ name = "queueup-api"
 main = "worker.ts"
 compatibility_date = "2025-10-08"
 
+[vars]
+ALLOWED_ORIGINS = "https://queueup-mas.github.io"
+
 [triggers]
 crons = ["*/15 * * * *"]
 
