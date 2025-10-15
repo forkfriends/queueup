@@ -6,6 +6,7 @@ import './global.css';
 import HomeScreen from './components/Home/HomeScreen';
 import MakeQueueScreen from './components/Make/MakeQueueScreen';
 import JoinQueueScreen from './components/Join/JoinQueueScreen';
+import HostQueueScreen from './components/Host/HostQueueScreen';
 import type { RootStackParamList } from './types/navigation';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

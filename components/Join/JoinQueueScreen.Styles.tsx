@@ -71,4 +71,21 @@ export default StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  resultCard: {
+    marginTop: 24,
+    backgroundColor: '#f7f7f7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#dedede',
+    padding: 16,
+  },
+  resultText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  resultHint: {
+    fontSize: 14,
+    color: '#555',
+  },
 });
