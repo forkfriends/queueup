@@ -16,13 +16,18 @@ export default function App() {
     <NavigationContainer>
       <StatusBar style="auto" />
       <Stack.Navigator initialRouteName="HomeScreen">
-        <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }}/>
+        <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }} />
         <Stack.Screen
           name="MakeQueueScreen"
           component={MakeQueueScreen}
           options={{ title: '' }}
         />
-        <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }}/>
+        <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }} />
+        <Stack.Screen
+          name="HostQueueScreen"
+          component={HostQueueScreen}
+          options={{ title: '' }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
