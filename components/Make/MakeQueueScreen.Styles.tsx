@@ -56,6 +56,44 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  resultCard: {
+    marginTop: 24,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#d6d6d6',
+    padding: 18,
+    backgroundColor: '#f7f7f7',
+  },
+  resultHeading: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  resultLine: {
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  resultCode: {
+    fontWeight: '700',
+  },
+  resultHint: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 4,
+  },
+  hostButton: {
+    marginTop: 16,
+    backgroundColor: '#1f6feb',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hostButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
 
 export default styles;

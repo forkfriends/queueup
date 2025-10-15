@@ -6,6 +6,7 @@ import './global.css';
 import HomeScreen from './components/Home/HomeScreen';
 import MakeQueueScreen from './components/Make/MakeQueueScreen';
 import JoinQueueScreen from './components/Join/JoinQueueScreen';
+import HostQueueScreen from './components/Host/HostQueueScreen';
 import type { RootStackParamList } from './types/navigation';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -18,6 +19,7 @@ export default function App() {
         <Stack.Screen name="HomeScreen" component={HomeScreen} />
         <Stack.Screen name="MakeQueueScreen" component={MakeQueueScreen} />
         <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} />
+        <Stack.Screen name="HostQueueScreen" component={HostQueueScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

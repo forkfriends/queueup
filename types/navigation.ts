@@ -1,6 +1,11 @@
 export type RootStackParamList = {
   HomeScreen: undefined;
-  MakeQueueScreen: { id: string };
-  JoinQueueScreen: { id: string };
-  // Can figure out later as to how we use those ids if necessary
+  MakeQueueScreen: { id: string } | undefined;
+  JoinQueueScreen: { id: string } | undefined;
+  HostQueueScreen: {
+    code: string;
+    sessionId: string;
+    wsUrl: string;
+    hostAuthToken?: string;
+  };
 };

@@ -7,11 +7,14 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
+import { createQueue, CreateQueueResult } from '../../lib/backend';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 
@@ -20,19 +23,41 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const [maxSize, setMaxSize] = useState('');
   const [hours, setHours] = useState('');
   const [contact, setContact] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<CreateQueueResult | null>(null);
 
-  const onSubmit = () => {
-    // TODO: replace with your actual submit logic when we are passed the prototype phase
-    console.log({ location, maxSize, hours, contact });
-    navigation.goBack();
+  const openHostControls = () => {
+    if (!result) return;
+    navigation.navigate('HostQueueScreen', {
+      code: result.code,
+      sessionId: result.sessionId,
+      wsUrl: result.wsUrl,
+      hostAuthToken: result.hostAuthToken,
+    });
+  };
+
+  const onSubmit = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const created = await createQueue();
+      setResult(created);
+      Alert.alert('Queue Created', `Share this code with guests: ${created.code}`, [
+        { text: 'OK' },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error creating queue';
+      Alert.alert('Unable to create queue', message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <SafeAreaProvider style={styles.safe}>
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', android: undefined })}
-        style={{ flex: 1 }}
-      >
+        style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Make Queue</Text>
 
@@ -81,14 +106,35 @@ export default function MakeQueueScreen({ navigation }: Props) {
             />
 
             {/* Submit */}
-            <Pressable style={styles.button} onPress={onSubmit}>
-              <Text style={styles.buttonText}>Submit</Text>
+            <Pressable style={styles.button} onPress={onSubmit} disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Create Queue</Text>
+              )}
             </Pressable>
           </View>
+
+          {result ? (
+            <View style={styles.resultCard}>
+              <Text style={styles.resultHeading}>Queue Ready</Text>
+              <Text style={styles.resultLine}>
+                Code: <Text style={styles.resultCode}>{result.code}</Text>
+              </Text>
+              <Text style={styles.resultLine}>Share join link: {result.joinUrl}</Text>
+              <Text style={styles.resultLine}>Session ID: {result.sessionId}</Text>
+              {result.hostAuthToken ? (
+                <Text style={styles.resultHint}>
+                  Host credentials stored on this device. Open the host console to advance parties.
+                </Text>
+              ) : null}
+              <Pressable style={styles.hostButton} onPress={openHostControls}>
+                <Text style={styles.hostButtonText}>Open Host Console</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaProvider>
   );
 }
-
-
