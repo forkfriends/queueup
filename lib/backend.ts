@@ -60,7 +60,7 @@ export async function createQueue(): Promise<CreateQueueResult> {
   }
 
   const data = (await response.json()) as CreateQueueResult;
-  const hostAuthToken = extractHostToken(response.headers.get('set-cookie'));
+  const hostAuthToken = data.hostAuthToken ?? extractHostToken(response.headers.get('set-cookie'));
   return { ...data, hostAuthToken };
 }
 

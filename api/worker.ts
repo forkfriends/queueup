@@ -116,6 +116,7 @@ async function handleCreate(
     sessionId,
     joinUrl,
     wsUrl,
+    hostAuthToken: hostCookieValue,
   });
 
   return new Response(body, { status: 200, headers });

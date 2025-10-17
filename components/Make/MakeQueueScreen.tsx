@@ -125,6 +125,16 @@ export default function MakeQueueScreen({ navigation }: Props) {
     setLoading(true);
     try {
       const created = await createQueue();
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && created.hostAuthToken) {
+        try {
+          window.sessionStorage.setItem(
+            `queueup-host-auth:${created.sessionId}`,
+            created.hostAuthToken
+          );
+        } catch {
+          // Ignore storage errors (e.g. private mode)
+        }
+      }
       navigation.navigate('HostQueueScreen', {
         code: created.code,
         sessionId: created.sessionId,

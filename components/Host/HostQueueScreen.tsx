@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -17,7 +18,6 @@ import {
   advanceQueueHost,
   closeQueueHost,
   HostParty,
-  HOST_COOKIE_NAME,
   buildHostConnectUrl,
 } from '../../lib/backend';
 
@@ -32,7 +32,18 @@ type ConnectionState = 'connecting' | 'open' | 'closed';
 const RECONNECT_DELAY_MS = 3000;
 
 export default function HostQueueScreen({ route }: Props) {
-  const { code, sessionId, wsUrl, hostAuthToken, joinUrl } = route.params;
+  const { code, sessionId, wsUrl, hostAuthToken: initialHostAuthToken, joinUrl } = route.params;
+  const storageKey = `queueup-host-auth:${sessionId}`;
+
+  const [hostToken, setHostToken] = useState<string | undefined>(() => {
+    if (initialHostAuthToken) {
+      return initialHostAuthToken;
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      return window.sessionStorage.getItem(storageKey) ?? undefined;
+    }
+    return undefined;
+  });
 
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -45,11 +56,22 @@ export default function HostQueueScreen({ route }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const webSocketUrl = useMemo(
-    () => buildHostConnectUrl(wsUrl, hostAuthToken),
-    [wsUrl, hostAuthToken]
-  );
-  const hasHostAuth = Boolean(hostAuthToken);
+  useEffect(() => {
+    if (!initialHostAuthToken) {
+      return;
+    }
+    setHostToken(initialHostAuthToken);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(storageKey, initialHostAuthToken);
+      } catch {
+        // Ignore storage errors in restricted environments
+      }
+    }
+  }, [initialHostAuthToken, storageKey]);
+
+  const webSocketUrl = useMemo(() => buildHostConnectUrl(wsUrl, hostToken), [wsUrl, hostToken]);
+  const hasHostAuth = Boolean(hostToken);
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeout.current) {
@@ -76,8 +98,10 @@ export default function HostQueueScreen({ route }: Props) {
     try {
       const parsed = JSON.parse(event.data) as HostMessage;
       if (parsed.type === 'queue_update') {
-        const queueEntries = Array.isArray(parsed.queue) ? parsed.queue : [];
-        const serving = parsed.nowServing ?? null;
+        const queueEntries = Array.isArray(parsed.queue)
+          ? (parsed.queue as HostParty[])
+          : [];
+        const serving = (parsed.nowServing ?? null) as HostParty | null;
         setQueue(queueEntries);
         setNowServing(serving);
         if (queueEntries.length > 0 || serving) {
@@ -108,12 +132,7 @@ export default function HostQueueScreen({ route }: Props) {
     setConnectionState('connecting');
     setConnectionError(null);
 
-    const socket = new WebSocket(webSocketUrl, undefined, {
-      headers: {
-        Cookie: `${HOST_COOKIE_NAME}=${hostAuthToken}`,
-        'X-Host-Auth': hostAuthToken as string,
-      },
-    });
+    const socket = new WebSocket(webSocketUrl);
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -147,7 +166,7 @@ export default function HostQueueScreen({ route }: Props) {
     clearReconnectTimeout,
     closeSocket,
     webSocketUrl,
-    hostAuthToken,
+    hostToken,
     handleMessage,
     closed,
   ]);
@@ -189,7 +208,7 @@ export default function HostQueueScreen({ route }: Props) {
       try {
         const result = await advanceQueueHost({
           code,
-          hostAuthToken: hostAuthToken as string,
+          hostAuthToken: hostToken as string,
           servedPartyId: nowServing?.id,
           nextPartyId,
         });
@@ -202,7 +221,7 @@ export default function HostQueueScreen({ route }: Props) {
         setActionLoading(false);
       }
     },
-    [actionLoading, code, hasHostAuth, hostAuthToken, nowServing?.id]
+  [actionLoading, code, hasHostAuth, hostToken, nowServing?.id]
   );
 
   const advanceSpecific = useCallback(
@@ -222,7 +241,7 @@ export default function HostQueueScreen({ route }: Props) {
     }
     const confirmClose = () => {
       setCloseLoading(true);
-      closeQueueHost({ code, hostAuthToken: hostAuthToken as string })
+  closeQueueHost({ code, hostAuthToken: hostToken as string })
         .then(() => {
           setClosed(true);
           setQueue([]);
@@ -247,7 +266,7 @@ export default function HostQueueScreen({ route }: Props) {
       ],
       { cancelable: true }
     );
-  }, [closeLoading, code, hasHostAuth, hostAuthToken]);
+  }, [closeLoading, code, hasHostAuth, hostToken]);
 
   const reconnectManually = useCallback(
     (event?: GestureResponderEvent) => {
