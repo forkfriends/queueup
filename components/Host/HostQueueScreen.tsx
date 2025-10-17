@@ -8,6 +8,7 @@ import {
   View,
   type GestureResponderEvent,
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
@@ -31,7 +32,7 @@ type ConnectionState = 'connecting' | 'open' | 'closed';
 const RECONNECT_DELAY_MS = 3000;
 
 export default function HostQueueScreen({ route }: Props) {
-  const { code, sessionId, wsUrl, hostAuthToken } = route.params;
+  const { code, sessionId, wsUrl, hostAuthToken, joinUrl } = route.params;
 
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -173,6 +174,7 @@ export default function HostQueueScreen({ route }: Props) {
       : connectionState === 'connecting'
         ? 'Connecting…'
         : 'Disconnected';
+  const shareableLink = joinUrl ?? null;
 
   const disabledAdvance =
     !hasHostAuth || actionLoading || closeLoading || closed || (queueCount === 0 && !nowServing);
@@ -299,6 +301,11 @@ export default function HostQueueScreen({ route }: Props) {
           <Text style={styles.headerTitle}>Host Console</Text>
           <Text style={styles.headerLine}>Queue code: {code}</Text>
           <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
+          {shareableLink ? (
+            <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
+              Guest link: {shareableLink}
+            </Text>
+          ) : null}
           <View style={styles.statusRow}>
             <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
               {closed ? 'Closed' : 'Active'}
@@ -321,6 +328,16 @@ export default function HostQueueScreen({ route }: Props) {
             </Text>
           ) : null}
         </View>
+
+        {shareableLink ? (
+          <View style={styles.qrCard}>
+            <Text style={styles.qrHeading}>Guest QR Code</Text>
+            <View style={styles.qrCodeWrapper}>
+              <QRCode value={shareableLink} size={180} />
+            </View>
+            <Text style={styles.qrHint}>Have guests scan to join instantly.</Text>
+          </View>
+        ) : null}
 
         <View style={styles.nowServingCard}>
           <Text style={styles.nowServingHeading}>Now Serving</Text>

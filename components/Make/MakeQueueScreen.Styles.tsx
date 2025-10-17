@@ -40,8 +40,72 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
   },
+  sliderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  sliderHint: {
+    fontSize: 15,
+    color: '#444',
+    marginRight: 6,
+  },
+  sliderValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  slider: {
+    marginHorizontal: 4,
+  },
   textArea: {
     height: 100,
+  },
+  timeRow: { flexDirection: 'row' },
+  timeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+  },
+  timeInputLeft: {
+    marginRight: 6,
+  },
+  timeInputRight: {
+    marginLeft: 6,
+  },
+  timeLabel: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 4,
+  },
+  timeValue: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  timePickerContainer: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+  },
+  timePickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  timePickerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  timePickerDone: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1f6feb',
   },
   button: {
     marginTop: 18,

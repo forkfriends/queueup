@@ -173,6 +173,34 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600',
   },
+  qrCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    backgroundColor: '#fff',
+    padding: 20,
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  qrHeading: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  qrCodeWrapper: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#fafafa',
+  },
+  qrHint: {
+    fontSize: 13,
+    color: '#606060',
+    textAlign: 'center',
+  },
 });
 
 export default styles;
