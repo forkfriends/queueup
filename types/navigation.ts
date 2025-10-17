@@ -6,6 +6,9 @@ export type RootStackParamList = {
     code: string;
     sessionId: string;
     wsUrl: string;
+    joinUrl?: string;
     hostAuthToken?: string;
+    eventName?: string;
+    maxGuests?: number;
   };
 };

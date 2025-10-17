@@ -22,6 +22,8 @@ const ROUTE =
 const SHORT_CODE_LENGTH = 6;
 const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const MIN_QUEUE_CAPACITY = 1;
+const MAX_QUEUE_CAPACITY = 100;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -80,15 +82,47 @@ async function handleCreate(
   url: URL,
   corsOrigin: string | null
 ): Promise<Response> {
+  const payload = await readJson(request);
+  if (!payload || typeof payload !== 'object') {
+    return jsonError('Invalid request body', 400);
+  }
+
+  const rawEventName = typeof (payload as any).eventName === 'string' ? (payload as any).eventName.trim() : '';
+  if (!rawEventName) {
+    return jsonError('eventName is required', 400);
+  }
+  if (rawEventName.length > 120) {
+    return jsonError('eventName must be 120 characters or fewer', 400);
+  }
+
+  const rawMaxGuests = (payload as any).maxGuests;
+  let maxGuests: number | null = null;
+  if (typeof rawMaxGuests === 'number') {
+    maxGuests = rawMaxGuests;
+  } else if (typeof rawMaxGuests === 'string' && rawMaxGuests.trim().length > 0) {
+    const parsed = Number.parseInt(rawMaxGuests, 10);
+    if (Number.isFinite(parsed)) {
+      maxGuests = parsed;
+    }
+  }
+
+  if (maxGuests === null || !Number.isInteger(maxGuests)) {
+    return jsonError('maxGuests must be an integer', 400);
+  }
+  if (maxGuests < MIN_QUEUE_CAPACITY || maxGuests > MAX_QUEUE_CAPACITY) {
+    return jsonError('maxGuests must be between 1 and 100', 400);
+  }
+
+  const eventName = rawEventName;
   const id = env.QUEUE_DO.newUniqueId();
   const sessionId = id.toString();
 
   const shortCode = await generateUniqueCode(env);
 
   const insertResult = await env.DB.prepare(
-    "INSERT INTO sessions (id, short_code, status) VALUES (?1, ?2, 'active')"
+    "INSERT INTO sessions (id, short_code, status, event_name, max_guests) VALUES (?1, ?2, 'active', ?3, ?4)"
   )
-    .bind(sessionId, shortCode)
+    .bind(sessionId, shortCode, eventName, maxGuests)
     .run();
 
   if (insertResult.error) {
@@ -116,6 +150,9 @@ async function handleCreate(
     sessionId,
     joinUrl,
     wsUrl,
+    hostAuthToken: hostCookieValue,
+    eventName,
+    maxGuests,
   });
 
   return new Response(body, { status: 200, headers });

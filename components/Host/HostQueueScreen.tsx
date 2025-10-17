@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
   View,
   type GestureResponderEvent,
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
@@ -16,14 +18,13 @@ import {
   advanceQueueHost,
   closeQueueHost,
   HostParty,
-  HOST_COOKIE_NAME,
   buildHostConnectUrl,
 } from '../../lib/backend';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
 type HostMessage =
-  | { type: 'queue_update'; queue?: HostParty[]; nowServing?: HostParty | null }
+  | { type: 'queue_update'; queue?: HostParty[]; nowServing?: HostParty | null; maxGuests?: number }
   | Record<string, unknown>;
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -31,7 +32,31 @@ type ConnectionState = 'connecting' | 'open' | 'closed';
 const RECONNECT_DELAY_MS = 3000;
 
 export default function HostQueueScreen({ route }: Props) {
-  const { code, sessionId, wsUrl, hostAuthToken } = route.params;
+  const {
+    code,
+    sessionId,
+    wsUrl,
+    hostAuthToken: initialHostAuthToken,
+    joinUrl,
+    eventName,
+    maxGuests: initialMaxGuests,
+  } = route.params;
+  const storageKey = `queueup-host-auth:${sessionId}`;
+
+  const displayEventName = eventName?.trim() || null;
+  const [capacity, setCapacity] = useState<number | null>(
+    typeof initialMaxGuests === 'number' ? initialMaxGuests : null
+  );
+
+  const [hostToken, setHostToken] = useState<string | undefined>(() => {
+    if (initialHostAuthToken) {
+      return initialHostAuthToken;
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      return window.sessionStorage.getItem(storageKey) ?? undefined;
+    }
+    return undefined;
+  });
 
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -44,11 +69,22 @@ export default function HostQueueScreen({ route }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const webSocketUrl = useMemo(
-    () => buildHostConnectUrl(wsUrl, hostAuthToken),
-    [wsUrl, hostAuthToken]
-  );
-  const hasHostAuth = Boolean(hostAuthToken);
+  useEffect(() => {
+    if (!initialHostAuthToken) {
+      return;
+    }
+    setHostToken(initialHostAuthToken);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(storageKey, initialHostAuthToken);
+      } catch {
+        // Ignore storage errors in restricted environments
+      }
+    }
+  }, [initialHostAuthToken, storageKey]);
+
+  const webSocketUrl = useMemo(() => buildHostConnectUrl(wsUrl, hostToken), [wsUrl, hostToken]);
+  const hasHostAuth = Boolean(hostToken);
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeout.current) {
@@ -75,10 +111,15 @@ export default function HostQueueScreen({ route }: Props) {
     try {
       const parsed = JSON.parse(event.data) as HostMessage;
       if (parsed.type === 'queue_update') {
-        const queueEntries = Array.isArray(parsed.queue) ? parsed.queue : [];
-        const serving = parsed.nowServing ?? null;
+        const queueEntries = Array.isArray(parsed.queue)
+          ? (parsed.queue as HostParty[])
+          : [];
+        const serving = (parsed.nowServing ?? null) as HostParty | null;
         setQueue(queueEntries);
         setNowServing(serving);
+        if (typeof parsed.maxGuests === 'number') {
+          setCapacity(parsed.maxGuests);
+        }
         if (queueEntries.length > 0 || serving) {
           setClosed(false);
         }
@@ -107,12 +148,7 @@ export default function HostQueueScreen({ route }: Props) {
     setConnectionState('connecting');
     setConnectionError(null);
 
-    const socket = new WebSocket(webSocketUrl, undefined, {
-      headers: {
-        Cookie: `${HOST_COOKIE_NAME}=${hostAuthToken}`,
-        'X-Host-Auth': hostAuthToken as string,
-      },
-    });
+    const socket = new WebSocket(webSocketUrl);
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -146,7 +182,7 @@ export default function HostQueueScreen({ route }: Props) {
     clearReconnectTimeout,
     closeSocket,
     webSocketUrl,
-    hostAuthToken,
+    hostToken,
     handleMessage,
     closed,
   ]);
@@ -173,6 +209,7 @@ export default function HostQueueScreen({ route }: Props) {
       : connectionState === 'connecting'
         ? 'Connecting…'
         : 'Disconnected';
+  const shareableLink = joinUrl ?? null;
 
   const disabledAdvance =
     !hasHostAuth || actionLoading || closeLoading || closed || (queueCount === 0 && !nowServing);
@@ -187,7 +224,7 @@ export default function HostQueueScreen({ route }: Props) {
       try {
         const result = await advanceQueueHost({
           code,
-          hostAuthToken: hostAuthToken as string,
+          hostAuthToken: hostToken as string,
           servedPartyId: nowServing?.id,
           nextPartyId,
         });
@@ -200,7 +237,7 @@ export default function HostQueueScreen({ route }: Props) {
         setActionLoading(false);
       }
     },
-    [actionLoading, code, hasHostAuth, hostAuthToken, nowServing?.id]
+  [actionLoading, code, hasHostAuth, hostToken, nowServing?.id]
   );
 
   const advanceSpecific = useCallback(
@@ -220,7 +257,7 @@ export default function HostQueueScreen({ route }: Props) {
     }
     const confirmClose = () => {
       setCloseLoading(true);
-      closeQueueHost({ code, hostAuthToken: hostAuthToken as string })
+  closeQueueHost({ code, hostAuthToken: hostToken as string })
         .then(() => {
           setClosed(true);
           setQueue([]);
@@ -245,7 +282,7 @@ export default function HostQueueScreen({ route }: Props) {
       ],
       { cancelable: true }
     );
-  }, [closeLoading, code, hasHostAuth, hostAuthToken]);
+  }, [closeLoading, code, hasHostAuth, hostToken]);
 
   const reconnectManually = useCallback(
     (event?: GestureResponderEvent) => {
@@ -297,8 +334,21 @@ export default function HostQueueScreen({ route }: Props) {
       <View style={styles.container}>
         <View style={styles.headerCard}>
           <Text style={styles.headerTitle}>Host Console</Text>
+          {displayEventName ? (
+            <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
+              {displayEventName}
+            </Text>
+          ) : null}
+          {typeof capacity === 'number' ? (
+            <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
+          ) : null}
           <Text style={styles.headerLine}>Queue code: {code}</Text>
           <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
+          {shareableLink ? (
+            <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
+              Guest link: {shareableLink}
+            </Text>
+          ) : null}
           <View style={styles.statusRow}>
             <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
               {closed ? 'Closed' : 'Active'}
@@ -321,6 +371,16 @@ export default function HostQueueScreen({ route }: Props) {
             </Text>
           ) : null}
         </View>
+
+        {shareableLink ? (
+          <View style={styles.qrCard}>
+            <Text style={styles.qrHeading}>Guest QR Code</Text>
+            <View style={styles.qrCodeWrapper}>
+              <QRCode value={shareableLink} size={180} />
+            </View>
+            <Text style={styles.qrHint}>Have guests scan to join instantly.</Text>
+          </View>
+        ) : null}
 
         <View style={styles.nowServingCard}>
           <Text style={styles.nowServingHeading}>Now Serving</Text>

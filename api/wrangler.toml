@@ -3,7 +3,7 @@ main = "worker.ts"
 compatibility_date = "2025-10-08"
 
 [vars]
-ALLOWED_ORIGINS = "https://queueup-mas.github.io"
+ALLOWED_ORIGINS = "https://queueup-mas.github.io, http://localhost:8081"
 
 [triggers]
 crons = ["*/15 * * * *"]

@@ -18,11 +18,13 @@ interface StoredState {
   nowServing: QueueParty | null;
   closed?: boolean;
   pendingPartyId?: string | null;
+  maxGuests?: number;
 }
 
 type ConnectionInfo = { role: 'host' } | { role: 'guest'; partyId: string };
 
 const CALL_TIMEOUT_MS = 2 * 60 * 1000;
+const DEFAULT_MAX_GUESTS = 100;
 
 function logPrefix(sessionId: string, scope: string): string {
   return `[QueueDO ${sessionId}] ${scope}:`;
@@ -34,6 +36,7 @@ export class QueueDO implements DurableObject {
   private nowServing: QueueParty | null = null;
   private pendingPartyId: string | null = null;
   private closed = false;
+  private maxGuests = DEFAULT_MAX_GUESTS;
 
   private sockets = new Map<WebSocket, ConnectionInfo>();
   private guestSockets = new Map<string, Set<WebSocket>>();
@@ -105,10 +108,16 @@ export class QueueDO implements DurableObject {
       return this.jsonError('size must be a positive integer', 400);
     }
 
+    const normalizedSize = typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : 1;
+    const totalGuests = this.computeGuestCount();
+    if (totalGuests + normalizedSize > this.maxGuests) {
+      return this.jsonError('Queue is full', 409);
+    }
+
     const party: QueueParty = {
       id: crypto.randomUUID(),
       name,
-      size,
+      size: normalizedSize,
       status: 'waiting',
       nearby: false,
       joinedAt: Date.now(),
@@ -119,7 +128,7 @@ export class QueueDO implements DurableObject {
     const statements = [
       this.env.DB.prepare(
         "INSERT INTO parties (id, session_id, name, size, status, nearby) VALUES (?1, ?2, ?3, ?4, 'waiting', 0)"
-      ).bind(party.id, this.sessionId, name ?? null, size ?? null),
+      ).bind(party.id, this.sessionId, name ?? null, normalizedSize),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'joined', ?3)"
       ).bind(
@@ -546,6 +555,7 @@ export class QueueDO implements DurableObject {
       type: 'queue_update',
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
+      maxGuests: this.maxGuests,
     });
 
     for (const [socket, info] of this.sockets.entries()) {
@@ -615,6 +625,7 @@ export class QueueDO implements DurableObject {
       type: 'queue_update',
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
+      maxGuests: this.maxGuests,
     });
     this.safeSend(socket, message);
   }
@@ -651,6 +662,20 @@ export class QueueDO implements DurableObject {
     };
   }
 
+  private computeGuestCount(): number {
+    const waiting = this.queue.reduce((sum, entry) => sum + this.partySize(entry), 0);
+    const serving = this.partySize(this.nowServing);
+    return waiting + serving;
+  }
+
+  private partySize(party: QueueParty | null | undefined): number {
+    if (!party) {
+      return 0;
+    }
+    const value = party.size;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1;
+  }
+
   private toHostParty(party: QueueParty): Omit<QueueParty, 'joinedAt'> & { joinedAt: number } {
     return {
       id: party.id,
@@ -682,6 +707,7 @@ export class QueueDO implements DurableObject {
       }
       this.closed = stored.closed ?? false;
       this.pendingPartyId = stored.pendingPartyId ?? (this.nowServing ? this.nowServing.id : null);
+      this.maxGuests = stored.maxGuests ?? DEFAULT_MAX_GUESTS;
       return;
     }
 
@@ -690,11 +716,18 @@ export class QueueDO implements DurableObject {
   }
 
   private async loadFromDatabase(): Promise<void> {
-    const sessionRow = await this.env.DB.prepare('SELECT status FROM sessions WHERE id = ?1')
+    const sessionRow = await this.env.DB.prepare(
+      'SELECT status, max_guests FROM sessions WHERE id = ?1'
+    )
       .bind(this.sessionId)
-      .first<{ status: string }>();
+      .first<{ status: string; max_guests?: number | null }>();
 
     this.closed = sessionRow?.status === 'closed';
+    if (typeof sessionRow?.max_guests === 'number' && Number.isFinite(sessionRow.max_guests)) {
+      this.maxGuests = sessionRow.max_guests;
+    } else {
+      this.maxGuests = DEFAULT_MAX_GUESTS;
+    }
 
     const { results } = await this.env.DB.prepare(
       "SELECT id, name, size, joined_at, status, nearby FROM parties WHERE session_id = ?1 AND status IN ('waiting','called') ORDER BY joined_at ASC"
@@ -713,10 +746,14 @@ export class QueueDO implements DurableObject {
     this.nowServing = null;
     if (results) {
       for (const row of results) {
+        const sizeValue =
+          typeof row.size === 'number' && Number.isFinite(row.size) && row.size > 0
+            ? row.size
+            : 1;
         const party: QueueParty = {
           id: row.id,
           name: row.name ?? undefined,
-          size: row.size ?? undefined,
+          size: sizeValue,
           status: row.status === 'called' ? 'called' : 'waiting',
           nearby: row.nearby === 1,
           joinedAt: (row.joined_at ?? Math.floor(Date.now() / 1000)) * 1000,
@@ -737,6 +774,7 @@ export class QueueDO implements DurableObject {
       nowServing: this.nowServing,
       closed: this.closed,
       pendingPartyId: this.pendingPartyId,
+      maxGuests: this.maxGuests,
     });
   }
 
