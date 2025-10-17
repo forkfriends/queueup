@@ -28,6 +28,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
+  headerEvent: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#222',
+  },
   headerLine: {
     fontSize: 15,
     color: '#444',

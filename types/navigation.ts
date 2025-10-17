@@ -8,5 +8,7 @@ export type RootStackParamList = {
     wsUrl: string;
     joinUrl?: string;
     hostAuthToken?: string;
+    eventName?: string;
+    maxGuests?: number;
   };
 };

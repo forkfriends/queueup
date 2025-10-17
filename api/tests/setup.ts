@@ -35,4 +35,12 @@ await applyD1Migrations(env.DB, [
       `CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, ts);`,
     ],
   },
+  {
+    name: '002_add_event_name.sql',
+    queries: [`ALTER TABLE sessions ADD COLUMN event_name TEXT;`],
+  },
+  {
+    name: '003_add_max_guests.sql',
+    queries: [`ALTER TABLE sessions ADD COLUMN max_guests INTEGER DEFAULT 100;`],
+  },
 ]);

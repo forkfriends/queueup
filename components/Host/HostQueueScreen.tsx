@@ -24,7 +24,7 @@ import {
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
 type HostMessage =
-  | { type: 'queue_update'; queue?: HostParty[]; nowServing?: HostParty | null }
+  | { type: 'queue_update'; queue?: HostParty[]; nowServing?: HostParty | null; maxGuests?: number }
   | Record<string, unknown>;
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -32,8 +32,21 @@ type ConnectionState = 'connecting' | 'open' | 'closed';
 const RECONNECT_DELAY_MS = 3000;
 
 export default function HostQueueScreen({ route }: Props) {
-  const { code, sessionId, wsUrl, hostAuthToken: initialHostAuthToken, joinUrl } = route.params;
+  const {
+    code,
+    sessionId,
+    wsUrl,
+    hostAuthToken: initialHostAuthToken,
+    joinUrl,
+    eventName,
+    maxGuests: initialMaxGuests,
+  } = route.params;
   const storageKey = `queueup-host-auth:${sessionId}`;
+
+  const displayEventName = eventName?.trim() || null;
+  const [capacity, setCapacity] = useState<number | null>(
+    typeof initialMaxGuests === 'number' ? initialMaxGuests : null
+  );
 
   const [hostToken, setHostToken] = useState<string | undefined>(() => {
     if (initialHostAuthToken) {
@@ -104,6 +117,9 @@ export default function HostQueueScreen({ route }: Props) {
         const serving = (parsed.nowServing ?? null) as HostParty | null;
         setQueue(queueEntries);
         setNowServing(serving);
+        if (typeof parsed.maxGuests === 'number') {
+          setCapacity(parsed.maxGuests);
+        }
         if (queueEntries.length > 0 || serving) {
           setClosed(false);
         }
@@ -318,6 +334,14 @@ export default function HostQueueScreen({ route }: Props) {
       <View style={styles.container}>
         <View style={styles.headerCard}>
           <Text style={styles.headerTitle}>Host Console</Text>
+          {displayEventName ? (
+            <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
+              {displayEventName}
+            </Text>
+          ) : null}
+          {typeof capacity === 'number' ? (
+            <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
+          ) : null}
           <Text style={styles.headerLine}>Queue code: {code}</Text>
           <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
           {shareableLink ? (

@@ -51,6 +51,7 @@ function formatTime(date: Date): string {
 }
 
 export default function MakeQueueScreen({ navigation }: Props) {
+  const [eventName, setEventName] = useState('');
   const [location, setLocation] = useState('');
   const [maxSize, setMaxSize] = useState<number>(DEFAULT_QUEUE_SIZE);
   const [activePicker, setActivePicker] = useState<TimeField | null>(null);
@@ -122,9 +123,18 @@ export default function MakeQueueScreen({ navigation }: Props) {
 
   const onSubmit = async () => {
     if (loading) return;
+    const trimmedEventName = eventName.trim();
+    if (!trimmedEventName) {
+      Alert.alert('Add event name', 'Please provide a name for this event.');
+      return;
+    }
+    const normalizedMaxGuests = Math.min(MAX_QUEUE_SIZE, Math.max(MIN_QUEUE_SIZE, maxSize));
     setLoading(true);
     try {
-      const created = await createQueue();
+      const created = await createQueue({
+        eventName: trimmedEventName,
+        maxGuests: normalizedMaxGuests,
+      });
       if (Platform.OS === 'web' && typeof window !== 'undefined' && created.hostAuthToken) {
         try {
           window.sessionStorage.setItem(
@@ -141,6 +151,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
         wsUrl: created.wsUrl,
         joinUrl: created.joinUrl,
         hostAuthToken: created.hostAuthToken,
+        eventName: created.eventName ?? trimmedEventName,
+        maxGuests: created.maxGuests ?? normalizedMaxGuests,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error creating queue';
@@ -159,6 +171,16 @@ export default function MakeQueueScreen({ navigation }: Props) {
           <Text style={styles.title}>Make Queue</Text>
 
           <View style={styles.card}>
+            {/* Event Name */}
+            <Text style={styles.label}>Event Name</Text>
+            <TextInput
+              placeholder="Dinner rush, pop-up, etc."
+              value={eventName}
+              onChangeText={setEventName}
+              style={styles.input}
+              returnKeyType="next"
+            />
+
             {/* Location */}
             <Text style={styles.label}>Location</Text>
             <TextInput

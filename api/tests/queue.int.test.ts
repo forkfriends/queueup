@@ -14,6 +14,7 @@ interface QueueUpdateMessage {
     id: string;
     status: string;
   };
+  maxGuests?: number;
 }
 
 interface PositionMessage {
@@ -83,16 +84,26 @@ async function fetchJson(path: string, init: RequestInit = {}): Promise<Response
 
 describe('queue lifecycle integration', () => {
   it('supports create, join, real-time updates, alarms, and close flows', async () => {
-    const createResponse = await fetchJson('/api/queue/create', { method: 'POST' });
+    const desiredEventName = 'Integration Test Event';
+    const desiredMaxGuests = 2;
+    const createResponse = await fetchJson('/api/queue/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ eventName: desiredEventName, maxGuests: desiredMaxGuests }),
+    });
     expect(createResponse.status).toBe(200);
     const createBody = await createResponse.json<{
       code: string;
       sessionId: string;
       joinUrl: string;
       wsUrl: string;
+      eventName: string;
+      maxGuests: number;
     }>();
     expect(createBody.code).toMatch(/^[A-Z0-9]{6}$/);
     expect(createBody.sessionId).toBeTruthy();
+    expect(createBody.eventName).toBe(desiredEventName);
+    expect(createBody.maxGuests).toBe(desiredMaxGuests);
     const sessionId = createBody.sessionId;
     const shortCode = createBody.code;
 
@@ -108,6 +119,7 @@ describe('queue lifecycle integration', () => {
     const hostInitial = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostInitial.type).toBe('queue_update');
     expect(hostInitial.queue.length).toBe(0);
+  expect(hostInitial.maxGuests).toBe(desiredMaxGuests);
 
     // Guest joins queue.
     const joinResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
@@ -124,6 +136,15 @@ describe('queue lifecycle integration', () => {
     expect(hostAfterJoin.queue.length).toBe(1);
     expect(hostAfterJoin.queue[0].id).toBe(partyId);
     expect(hostAfterJoin.queue[0].status).toBe('waiting');
+    expect(hostAfterJoin.maxGuests).toBe(desiredMaxGuests);
+
+    // Additional guest should not be able to join while capacity is full.
+    const overCapacityResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Overflow', size: 1, turnstileToken: 'stub-token' }),
+    });
+    expect(overCapacityResponse.status).toBe(409);
 
     // Guest websocket connection receives position updates.
     const guestWs = await connectWebSocket(`/api/queue/${shortCode}/connect?partyId=${partyId}`);
@@ -143,6 +164,7 @@ describe('queue lifecycle integration', () => {
     expect(nearbyResponse.status).toBe(200);
     const hostAfterNearby = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterNearby.queue[0].nearby).toBe(true);
+  expect(hostAfterNearby.maxGuests).toBe(desiredMaxGuests);
 
     // Host advances queue.
     const advanceResponse = await fetchJson(`/api/queue/${shortCode}/advance`, {
@@ -159,6 +181,7 @@ describe('queue lifecycle integration', () => {
 
     const hostAfterAdvance = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterAdvance.nowServing?.id).toBe(partyId);
+  expect(hostAfterAdvance.maxGuests).toBe(desiredMaxGuests);
 
     const guestCalled = await guestWs.waitForMessage<GuestMessage>();
     expect(guestCalled.type).toBe('called');
@@ -171,6 +194,7 @@ describe('queue lifecycle integration', () => {
 
     const hostAfterAlarm = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterAlarm.nowServing).toBeNull();
+  expect(hostAfterAlarm.maxGuests).toBe(desiredMaxGuests);
 
     const guestRemoved = await guestWs.waitForMessage<GuestMessage>();
     expect(guestRemoved).toEqual({ type: 'removed', reason: 'no_show' });
@@ -219,6 +243,16 @@ describe('queue lifecycle integration', () => {
       .first();
     const totalEvents = (eventRow as { count: number } | null)?.count ?? 0;
     expect(totalEvents >= 4).toBe(true);
+
+    const sessionRow = await env.DB.prepare('SELECT event_name FROM sessions WHERE id = ?1')
+      .bind(sessionId)
+      .first<{ event_name: string | null }>();
+    expect(sessionRow?.event_name).toBe(desiredEventName);
+
+    const capacityRow = await env.DB.prepare('SELECT max_guests FROM sessions WHERE id = ?1')
+      .bind(sessionId)
+      .first<{ max_guests: number | null }>();
+    expect(capacityRow?.max_guests).toBe(desiredMaxGuests);
 
     hostWs.socket.close(1000, 'done');
     guestWs.socket.close(1000, 'done');
