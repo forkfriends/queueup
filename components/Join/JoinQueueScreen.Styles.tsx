@@ -40,6 +40,20 @@ export default StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
   },
+  sliderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  sliderHint: {
+    fontSize: 15,
+    color: '#444',
+    marginRight: 6,
+  },
+  sliderValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  slider: {
+    marginHorizontal: 4,
+  },
   scanButton: {
     marginTop: 10,
     alignSelf: 'flex-start',

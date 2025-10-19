@@ -11,6 +11,7 @@ import {
   Alert,
   Modal,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
@@ -19,6 +20,10 @@ import styles from './JoinQueueScreen.Styles';
 import { buildGuestConnectUrl, joinQueue } from '../../lib/backend';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
+
+const MIN_QUEUE_SIZE = 1;
+const MAX_QUEUE_SIZE = 10;
+const DEFAULT_QUEUE_SIZE = 1;
 
 export default function JoinQueueScreen({ navigation }: Props) {
   const [key, setKey] = useState('');
@@ -37,6 +42,7 @@ export default function JoinQueueScreen({ navigation }: Props) {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
+  const [maxSize, setMaxSize] = useState<number>(DEFAULT_QUEUE_SIZE);
 
   const onCancel = () => navigation.goBack();
 
@@ -271,13 +277,20 @@ export default function JoinQueueScreen({ navigation }: Props) {
             />
 
             <Text style={styles.label}>Party Size</Text>
-            <TextInput
-              placeholder="1"
-              value={size}
-              onChangeText={setSize}
-              style={styles.input}
-              keyboardType="number-pad"
-              returnKeyType="done"
+            <View style={styles.sliderRow}>
+              <Text style={styles.sliderValue}>{maxSize}</Text>
+              <Text style={styles.sliderHint}>guests</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={MIN_QUEUE_SIZE}
+              maximumValue={MAX_QUEUE_SIZE}
+              step={1}
+              value={maxSize}
+              minimumTrackTintColor="#1f6feb"
+              maximumTrackTintColor="#d0d7de"
+              thumbTintColor="#1f6feb"
+              onValueChange={(value) => setMaxSize(Math.round(value))}
             />
 
             <View style={styles.actionsRow}>
