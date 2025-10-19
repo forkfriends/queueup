@@ -25,8 +25,12 @@ const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 10;
 const DEFAULT_QUEUE_SIZE = 1;
 
-export default function JoinQueueScreen({ navigation }: Props) {
-  const [key, setKey] = useState('');
+export default function JoinQueueScreen({ navigation, route }: Props) {
+  const routeCode =
+    route.params?.code && route.params.code.trim().length > 0
+      ? route.params.code.trim().toUpperCase().slice(-6)
+      : '';
+  const [key, setKey] = useState(routeCode);
   const [name, setName] = useState('');
   const [partySize, setPartySize] = useState<number>(DEFAULT_QUEUE_SIZE);
   const [loading, setLoading] = useState(false);
@@ -47,6 +51,17 @@ export default function JoinQueueScreen({ navigation }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const inQueue = Boolean(joinedCode && partyId);
   const isWeb = Platform.OS === 'web';
+
+  useEffect(() => {
+    if (!route.params?.code || inQueue) {
+      return;
+    }
+    const normalized = route.params.code.trim().toUpperCase().slice(-6);
+    if (!normalized) {
+      return;
+    }
+    setKey((current) => (current === normalized ? current : normalized));
+  }, [route.params?.code, inQueue]);
 
   const onSubmit = async () => {
     if (loading) return;
