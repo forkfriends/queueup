@@ -290,9 +290,8 @@ export default function HostQueueScreen({ route }: Props) {
         return true;
       }
       try {
-        const response = requestMediaPermission
-          ? await requestMediaPermission()
-          : await MediaLibrary.requestPermissionsAsync();
+        // Use requestMediaPermission consistently for requesting media permissions.
+        const response = await requestMediaPermission();
         return response?.granted ?? false;
       } catch (err) {
         console.warn('Media permission request failed', err);
