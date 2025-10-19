@@ -44,7 +44,7 @@ export default {
         try {
           redirectUrl = new URL(baseUrl);
         } catch (error) {
-          console.warn('Invalid APP_BASE_URL, falling back to default', error);
+          console.warn('Invalid APP_BASE_URL, falling back to default');
           redirectUrl = new URL(DEFAULT_APP_BASE_URL);
         }
         redirectUrl.searchParams.set('code', code);
