@@ -67,6 +67,7 @@ export default function HostQueueScreen({ route }: Props) {
   const [actionLoading, setActionLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
   const [closeConfirmVisibleWeb, setCloseConfirmVisibleWeb] = useState(false);
+  const isWeb = Platform.OS === 'web';
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -345,135 +346,147 @@ export default function HostQueueScreen({ route }: Props) {
     });
   };
 
-  return (
-    <SafeAreaProvider style={styles.safe}>
-      <View style={styles.container}>
-        <View style={styles.headerCard}>
-          <Text style={styles.headerTitle}>Host Console</Text>
-          {displayEventName ? (
-            <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
-              {displayEventName}
-            </Text>
-          ) : null}
-          {typeof capacity === 'number' ? (
-            <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
-          ) : null}
-          <Text style={styles.headerLine}>Queue code: {code}</Text>
-          <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
-          {shareableLink ? (
-            <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
-              Guest link: {shareableLink}
-            </Text>
-          ) : null}
-          <View style={styles.statusRow}>
-            <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
-              {closed ? 'Closed' : 'Active'}
-            </Text>
-            <Text style={styles.connectionText}>Connection: {connectionLabel}</Text>
-          </View>
-          {connectionError ? (
-            <>
-              <Text style={styles.connectionText}>{connectionError}</Text>
-              {hasHostAuth ? (
-                <Pressable style={styles.reconnectButton} onPress={reconnectManually}>
-                  <Text style={styles.reconnectButtonText}>Reconnect</Text>
-                </Pressable>
-              ) : null}
-            </>
-          ) : null}
-          {!hasHostAuth ? (
-            <Text style={styles.connectionText}>
-              Host authentication token missing. Create a queue on this device to control it.
-            </Text>
-          ) : null}
-        </View>
-
-        {shareableLink ? (
-          <View style={styles.qrCard}>
-            <Text style={styles.qrHeading}>Guest QR Code</Text>
-            <View style={styles.qrCodeWrapper}>
-              <QRCode value={shareableLink} size={180} />
-            </View>
-            <Text style={styles.qrHint}>Have guests scan to join instantly.</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.nowServingCard}>
-          <Text style={styles.nowServingHeading}>Now Serving</Text>
-          <Text style={styles.nowServingValue}>
-            {nowServing
-              ? `${nowServing.name?.trim() || 'Guest'}${nowServing.size ? ` (${nowServing.size})` : ''}`
-              : 'No party currently called.'}
+  const content = (
+    <>
+      <View style={styles.headerCard}>
+        <Text style={styles.headerTitle}>Host Console</Text>
+        {displayEventName ? (
+          <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
+            {displayEventName}
           </Text>
+        ) : null}
+        {typeof capacity === 'number' ? (
+          <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
+        ) : null}
+        <Text style={styles.headerLine}>Queue code: {code}</Text>
+        {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text> */}
+        {/* {shareableLink ? (
+          <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
+            Guest link: {shareableLink}
+          </Text>
+        ) : null} */}
+        <View style={styles.statusRow}>
+          <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
+            {closed ? 'Closed' : 'Active'}
+          </Text>
+          <Text style={styles.connectionText}>Connection: {connectionLabel}</Text>
         </View>
+        {connectionError ? (
+          <>
+            <Text style={styles.connectionText}>{connectionError}</Text>
+            {hasHostAuth ? (
+              <Pressable style={styles.reconnectButton} onPress={reconnectManually}>
+                <Text style={styles.reconnectButtonText}>Reconnect</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+        {!hasHostAuth ? (
+          <Text style={styles.connectionText}>
+            Host authentication token missing. Create a queue on this device to control it.
+          </Text>
+        ) : null}
+      </View>
 
-        <View style={styles.queueCard}>
-          <ScrollView contentContainerStyle={styles.queueScroll}>{renderQueueList()}</ScrollView>
+      {shareableLink ? (
+        <View style={styles.qrCard}>
+          <Text style={styles.qrHeading}>Guest QR Code</Text>
+          <View style={styles.qrCodeWrapper}>
+            <QRCode value={shareableLink} size={180} />
+          </View>
+          <Text style={styles.qrHint}>Have guests scan to join instantly.</Text>
         </View>
+      ) : null}
 
-        <View style={styles.queueActionsRow}>
-          <Pressable
-            style={[
-              styles.primaryButton,
-              disabledAdvance ? styles.primaryButtonDisabled : undefined,
-            ]}
-            disabled={disabledAdvance}
-            onPress={advanceCurrent}>
-            {actionLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>
-                {nowServing ? 'Mark Served & Call Next' : 'Call First Party'}
-              </Text>
-            )}
-          </Pressable>
+      <View style={styles.nowServingCard}>
+        <Text style={styles.nowServingHeading}>Now Serving</Text>
+        <Text style={styles.nowServingValue}>
+          {nowServing
+            ? `${nowServing.name?.trim() || 'Guest'}${nowServing.size ? ` (${nowServing.size})` : ''}`
+            : 'No party currently called.'}
+        </Text>
+      </View>
 
-          <Pressable
-            style={styles.destructiveButton}
-            disabled={disabledClose}
-            onPress={handleCloseQueue}>
-            {closeLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Close Queue</Text>
-            )}
-          </Pressable>
+      <View style={styles.queueActionsRow}>
+        <Pressable
+          style={[styles.primaryButton, disabledAdvance ? styles.primaryButtonDisabled : undefined]}
+          disabled={disabledAdvance}
+          onPress={advanceCurrent}>
+          {actionLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>
+              {nowServing ? 'Mark Served & Call Next' : 'Call First Party'}
+            </Text>
+          )}
+        </Pressable>
+
+        <Pressable
+          style={styles.destructiveButton}
+          disabled={disabledClose}
+          onPress={handleCloseQueue}>
+          {closeLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Close Queue</Text>
+          )}
+        </Pressable>
+      </View>
+
+      <View style={styles.queueCard}>
+        <View style={styles.queueList}>{renderQueueList()}</View>
+      </View>
+    </>
+  );
+
+  const webCloseModal = isWeb ? (
+    <Modal
+      visible={closeConfirmVisibleWeb}
+      transparent
+      animationType="fade"
+      onRequestClose={cancelCloseQueueWeb}>
+      <View style={styles.webModalBackdrop}>
+        <View style={styles.webModalCard}>
+          <Text style={styles.webModalTitle}>Close Queue</Text>
+          <Text style={styles.webModalMessage}>
+            Guests will no longer be able to join once closed. Proceed?
+          </Text>
+          <View style={styles.webModalActions}>
+            <Pressable style={styles.webModalCancelButton} onPress={cancelCloseQueueWeb}>
+              <Text style={styles.webModalCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.webModalConfirmButton,
+                closeLoading ? styles.webModalConfirmButtonDisabled : undefined,
+              ]}
+              onPress={confirmCloseQueueWeb}
+              disabled={closeLoading}>
+              {closeLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.webModalConfirmText}>Close Queue</Text>
+              )}
+            </Pressable>
+          </View>
         </View>
       </View>
-      {Platform.OS === 'web' ? (
-        <Modal
-          visible={closeConfirmVisibleWeb}
-          transparent
-          animationType="fade"
-          onRequestClose={cancelCloseQueueWeb}>
-          <View style={styles.webModalBackdrop}>
-            <View style={styles.webModalCard}>
-              <Text style={styles.webModalTitle}>Close Queue</Text>
-              <Text style={styles.webModalMessage}>
-                Guests will no longer be able to join once closed. Proceed?
-              </Text>
-              <View style={styles.webModalActions}>
-                <Pressable style={styles.webModalCancelButton} onPress={cancelCloseQueueWeb}>
-                  <Text style={styles.webModalCancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.webModalConfirmButton,
-                    closeLoading ? styles.webModalConfirmButtonDisabled : undefined,
-                  ]}
-                  onPress={confirmCloseQueueWeb}
-                  disabled={closeLoading}>
-                  {closeLoading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.webModalConfirmText}>Close Queue</Text>
-                  )}
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : null}
+    </Modal>
+  ) : null;
+
+  return (
+    <SafeAreaProvider style={styles.safe}>
+      {isWeb ? (
+        <View style={[styles.containerFixed, styles.containerContent]}>{content}</View>
+      ) : (
+        <ScrollView
+          style={styles.mobileScroll}
+          contentContainerStyle={styles.containerContent}
+          keyboardShouldPersistTaps="handled">
+          {content}
+        </ScrollView>
+      )}
+      {webCloseModal}
     </SafeAreaProvider>
   );
 }

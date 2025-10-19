@@ -5,11 +5,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FAF9FA',
   },
-  container: {
+  containerFixed: {
     flex: 1,
+  },
+  containerContent: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: 32,
     gap: 16,
+    flexGrow: 1,
+  },
+  mobileScroll: {
+    flex: 1,
   },
   headerCard: {
     borderRadius: 14,
@@ -84,14 +91,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   queueCard: {
-    flex: 1,
+    flexGrow: 1,
+    minHeight: 160,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#e6e6e6',
     backgroundColor: '#fff',
     overflow: 'hidden',
   },
-  queueScroll: {
+  queueList: {
+    flex: 1,
     paddingVertical: 8,
   },
   queueItem: {

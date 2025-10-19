@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ScrollView,
   KeyboardAvoidingView,
@@ -9,16 +9,17 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
-import { buildGuestConnectUrl, joinQueue } from '../../lib/backend';
+import { buildGuestConnectUrl, joinQueue, leaveQueue } from '../../lib/backend';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
-export default function JoinQueueScreen({ navigation }: Props) {
+export default function JoinQueueScreen(_: Props) {
   const [key, setKey] = useState('');
   const [name, setName] = useState('');
   const [size, setSize] = useState('1');
@@ -29,14 +30,21 @@ export default function JoinQueueScreen({ navigation }: Props) {
   );
   const [joinedCode, setJoinedCode] = useState<string | null>(null);
   const [partyId, setPartyId] = useState<string | null>(null);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
-
-  const onCancel = () => navigation.goBack();
+  const socketRef = useRef<WebSocket | null>(null);
+  const inQueue = Boolean(joinedCode && partyId);
+  const isWeb = Platform.OS === 'web';
 
   const onSubmit = async () => {
     if (loading) return;
+    if (inQueue) {
+      Alert.alert('Already in a queue', 'Please leave your current queue before joining another.');
+      return;
+    }
     const trimmed = key.trim().toUpperCase();
     if (!trimmed) {
       Alert.alert('Enter queue code', 'Please enter the queue key to continue.');
@@ -65,12 +73,39 @@ export default function JoinQueueScreen({ navigation }: Props) {
     }
   };
 
-  const clearReconnect = () => {
+  const clearReconnect = useCallback(() => {
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current);
       reconnectTimer.current = null;
     }
-  };
+  }, []);
+
+  const closeActiveSocket = useCallback(() => {
+    if (socketRef.current) {
+      try {
+        socketRef.current.close(1000, 'client_closed');
+      } catch {
+        // ignore socket close errors
+      }
+      socketRef.current = null;
+    }
+  }, []);
+
+  const resetSession = useCallback(
+    (message?: string) => {
+      shouldReconnectRef.current = false;
+      clearReconnect();
+      closeActiveSocket();
+      reconnectAttempt.current = 0;
+      setJoinedCode(null);
+      setPartyId(null);
+      setConnectionState('idle');
+      if (message !== undefined) {
+        setResultText(message);
+      }
+    },
+    [clearReconnect, closeActiveSocket]
+  );
 
   useEffect(() => {
     if (!joinedCode || !partyId) {
@@ -79,13 +114,14 @@ export default function JoinQueueScreen({ navigation }: Props) {
 
     shouldReconnectRef.current = true;
     const wsUrl = buildGuestConnectUrl(joinedCode, partyId);
-    let socket: WebSocket | null = null;
 
     const connect = () => {
       clearReconnect();
+      closeActiveSocket();
       setConnectionState('connecting');
 
-      socket = new WebSocket(wsUrl);
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
       socket.onopen = () => {
         setConnectionState('open');
       };
@@ -113,24 +149,22 @@ export default function JoinQueueScreen({ navigation }: Props) {
               break;
             }
             case 'removed': {
-              shouldReconnectRef.current = false;
               const reason = data.reason;
-              if (reason === 'served') {
-                setResultText('All set! You have been marked as served.');
-              } else if (reason === 'no_show') {
-                setResultText("We couldn't reach you, so you were removed from the queue.");
-              } else if (reason === 'kicked') {
-                setResultText('The host removed you from the queue.');
-              } else if (reason === 'closed') {
-                setResultText('Queue closed. Thanks for your patience!');
-              } else {
-                setResultText('You have left the queue.');
-              }
+              const message =
+                reason === 'served'
+                  ? 'All set! You have been marked as served.'
+                  : reason === 'no_show'
+                    ? "We couldn't reach you, so you were removed from the queue."
+                    : reason === 'kicked'
+                      ? 'The host removed you from the queue.'
+                      : reason === 'closed'
+                        ? 'Queue closed. Thanks for your patience!'
+                        : 'You have left the queue.';
+              resetSession(message);
               break;
             }
             case 'closed': {
-              shouldReconnectRef.current = false;
-              setResultText('Queue closed by the host. Thanks for waiting with us!');
+              resetSession('Queue closed by the host. Thanks for waiting with us!');
               break;
             }
             default:
@@ -141,6 +175,9 @@ export default function JoinQueueScreen({ navigation }: Props) {
         }
       };
       socket.onclose = (event) => {
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
         setConnectionState('closed');
         if (shouldReconnectRef.current && event.code !== 1000) {
           clearReconnect();
@@ -160,19 +197,16 @@ export default function JoinQueueScreen({ navigation }: Props) {
     return () => {
       shouldReconnectRef.current = false;
       clearReconnect();
-      if (socket) {
-        try {
-          socket.close();
-        } catch {
-          // ignore
-        }
-      }
+      closeActiveSocket();
     };
-  }, [joinedCode, partyId]);
+  }, [joinedCode, partyId, clearReconnect, closeActiveSocket, resetSession]);
 
   useEffect(() => {
-    return () => clearReconnect();
-  }, []);
+    return () => {
+      clearReconnect();
+      closeActiveSocket();
+    };
+  }, [clearReconnect, closeActiveSocket]);
 
   const connectionLabel = useMemo(() => {
     switch (connectionState) {
@@ -186,6 +220,79 @@ export default function JoinQueueScreen({ navigation }: Props) {
         return 'Waiting to connect…';
     }
   }, [connectionState]);
+
+  const performLeave = useCallback(async () => {
+    if (!joinedCode || !partyId) {
+      return;
+    }
+    setLeaveLoading(true);
+    try {
+      await leaveQueue({ code: joinedCode, partyId });
+      resetSession('You have left the queue.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to leave queue';
+      Alert.alert('Unable to leave queue', message);
+    } finally {
+      setLeaveConfirmVisibleWeb(false);
+      setLeaveLoading(false);
+    }
+  }, [joinedCode, partyId, resetSession]);
+
+  const cancelLeaveWeb = useCallback(() => {
+    if (leaveLoading) {
+      return;
+    }
+    setLeaveConfirmVisibleWeb(false);
+  }, [leaveLoading]);
+
+  const confirmLeave = useCallback(() => {
+    if (!joinedCode || !partyId || leaveLoading) {
+      return;
+    }
+    if (isWeb) {
+      setLeaveConfirmVisibleWeb(true);
+      return;
+    }
+    Alert.alert('Leave queue?', 'You will lose your place in line.', [
+      { text: 'Stay', style: 'cancel' },
+      { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
+    ]);
+  }, [joinedCode, partyId, leaveLoading, performLeave, isWeb]);
+
+  const webLeaveModal = isWeb ? (
+    <Modal
+      visible={leaveConfirmVisibleWeb}
+      transparent
+      animationType="fade"
+      onRequestClose={cancelLeaveWeb}>
+      <View style={styles.webModalBackdrop}>
+        <View style={styles.webModalCard}>
+          <Text style={styles.webModalTitle}>Leave queue?</Text>
+          <Text style={styles.webModalMessage}>
+            You will lose your place in line. Are you sure you want to leave?
+          </Text>
+          <View style={styles.webModalActions}>
+            <Pressable style={styles.webModalCancelButton} onPress={cancelLeaveWeb}>
+              <Text style={styles.webModalCancelText}>Stay</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.webModalConfirmButton,
+                leaveLoading ? styles.webModalConfirmButtonDisabled : undefined,
+              ]}
+              onPress={() => void performLeave()}
+              disabled={leaveLoading}>
+              {leaveLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.webModalConfirmText}>Leave Queue</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  ) : null;
 
   return (
     <SafeAreaProvider style={styles.safe}>
@@ -201,9 +308,10 @@ export default function JoinQueueScreen({ navigation }: Props) {
               placeholder="Value"
               value={key}
               onChangeText={setKey}
-              style={styles.input}
+              style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
               autoCapitalize="none"
               autoCorrect={false}
+              editable={!inQueue}
               returnKeyType="done"
             />
 
@@ -212,7 +320,8 @@ export default function JoinQueueScreen({ navigation }: Props) {
               placeholder="(optional)"
               value={name}
               onChangeText={setName}
-              style={styles.input}
+              style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
+              editable={!inQueue}
               returnKeyType="next"
             />
 
@@ -221,34 +330,51 @@ export default function JoinQueueScreen({ navigation }: Props) {
               placeholder="1"
               value={size}
               onChangeText={setSize}
-              style={styles.input}
+              style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
               keyboardType="number-pad"
+              editable={!inQueue}
               returnKeyType="done"
             />
 
             <View style={styles.actionsRow}>
-              <Pressable style={styles.cancelBox} onPress={onCancel}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-
-              <Pressable style={styles.button} onPress={onSubmit} disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.buttonText}>Join Queue</Text>
-                )}
-              </Pressable>
+              {inQueue ? (
+                <Pressable
+                  style={[
+                    styles.leaveButton,
+                    leaveLoading ? styles.leaveButtonDisabled : undefined,
+                  ]}
+                  onPress={confirmLeave}
+                  disabled={leaveLoading}>
+                  {leaveLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.buttonText}>Leave Queue</Text>
+                  )}
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={[styles.button, loading ? styles.buttonDisabled : undefined]}
+                  onPress={onSubmit}
+                  disabled={loading || inQueue}>
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.buttonText}>Join Queue</Text>
+                  )}
+                </Pressable>
+              )}
             </View>
           </View>
 
           {resultText ? (
             <View style={styles.resultCard}>
               <Text style={styles.resultText}>{resultText}</Text>
-              <Text style={styles.resultHint}>{connectionLabel}</Text>
+              {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
             </View>
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
+      {webLeaveModal}
     </SafeAreaProvider>
   );
 }
