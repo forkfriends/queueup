@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "web": {
       "favicon": "./assets/favicon.png",
-      "output": "single",         
+      "output": "single",
       "bundler": "metro"
     },
     "experiments": {
@@ -21,7 +21,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.my-expo-app"
@@ -30,7 +32,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.anonymous.myexpoapp"
     }
   }
 }

@@ -9,9 +9,11 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Modal,
 } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
 import { buildGuestConnectUrl, joinQueue } from '../../lib/backend';
@@ -32,6 +34,9 @@ export default function JoinQueueScreen({ navigation }: Props) {
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [scannerActive, setScannerActive] = useState(false);
 
   const onCancel = () => navigation.goBack();
 
@@ -63,6 +68,52 @@ export default function JoinQueueScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCloseScanner = () => {
+    setScannerActive(false);
+    setScannerVisible(false);
+  };
+
+  const handleOpenScanner = async () => {
+    if (cameraPermission?.granted) {
+      setScannerVisible(true);
+      setScannerActive(true);
+      return;
+    }
+
+    if (cameraPermission && !cameraPermission.canAskAgain && !cameraPermission.granted) {
+      Alert.alert(
+        'Camera access needed',
+        'Enable camera permissions in your device settings to scan QR codes.'
+      );
+      return;
+    }
+
+    const permissionResult = await requestCameraPermission();
+    if (permissionResult?.granted) {
+      setScannerVisible(true);
+      setScannerActive(true);
+    } else {
+      Alert.alert(
+        'Camera access needed',
+        'Enable camera permissions in your device settings to scan QR codes.'
+      );
+    }
+  };
+
+  const handleBarcodeScanned = ({ data }: BarcodeScanningResult) => {
+    if (!scannerActive) {
+      return;
+    }
+    const scanned = typeof data === 'string' ? data.trim() : '';
+    if (!scanned) {
+      return;
+    }
+
+    setScannerActive(false);
+    setKey(scanned.toUpperCase().slice(-6)); // use last 6 chars as key
+    setScannerVisible(false);
   };
 
   const clearReconnect = () => {
@@ -206,6 +257,9 @@ export default function JoinQueueScreen({ navigation }: Props) {
               autoCorrect={false}
               returnKeyType="done"
             />
+            <Pressable style={styles.scanButton} onPress={handleOpenScanner}>
+              <Text style={styles.scanButtonText}>Scan QR Code</Text>
+            </Pressable>
 
             <Text style={styles.label}>Your Name</Text>
             <TextInput
@@ -249,6 +303,26 @@ export default function JoinQueueScreen({ navigation }: Props) {
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={handleCloseScanner}>
+        <SafeAreaView style={styles.scannerContainer}>
+          <CameraView
+            style={styles.camera}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={scannerActive ? handleBarcodeScanned : undefined}
+          />
+          <View style={styles.scannerControls}>
+            <Text style={styles.scannerHint}>Align the QR code with the frame to fill the key.</Text>
+            <Pressable style={styles.scannerCloseButton} onPress={handleCloseScanner}>
+              <Text style={styles.scannerCloseText}>Close</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaProvider>
   );
 }
