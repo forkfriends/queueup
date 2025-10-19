@@ -40,6 +40,34 @@ export default StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
   },
+  sliderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  sliderHint: {
+    fontSize: 15,
+    color: '#444',
+    marginRight: 6,
+  },
+  sliderValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  slider: {
+    marginHorizontal: 4,
+  },
+  scanButton: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  scanButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#222',
+  },
   actionsRow: {
     marginTop: 22,
     flexDirection: 'row',
@@ -87,5 +115,34 @@ export default StyleSheet.create({
   resultHint: {
     fontSize: 14,
     color: '#555',
+  },
+  scannerContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  camera: {
+    flex: 1,
+  },
+  scannerControls: {
+    padding: 20,
+    backgroundColor: '#111',
+  },
+  scannerHint: {
+    color: '#f1f1f1',
+    fontSize: 16,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  scannerCloseButton: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 28,
+    borderRadius: 999,
+    backgroundColor: '#f5f5f5',
+  },
+  scannerCloseText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
   },
 });

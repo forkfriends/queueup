@@ -206,6 +206,38 @@ const styles = StyleSheet.create({
     color: '#606060',
     textAlign: 'center',
   },
+  qrActions: {
+    width: '100%',
+    marginTop: 4,
+  },
+  qrShareButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#222',
+    alignItems: 'center',
+  },
+  qrShareText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  qrSaveButton: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+  },
+  qrSaveText: {
+    color: '#111',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  qrButtonDisabled: {
+    opacity: 0.7,
+  },
 });
 
 export default styles;
