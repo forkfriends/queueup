@@ -25,14 +25,10 @@ const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 10;
 const DEFAULT_QUEUE_SIZE = 1;
 
-const MIN_QUEUE_SIZE = 1;
-const MAX_QUEUE_SIZE = 10;
-const DEFAULT_QUEUE_SIZE = 1;
-
 export default function JoinQueueScreen({ navigation }: Props) {
   const [key, setKey] = useState('');
   const [name, setName] = useState('');
-  const [size, setSize] = useState('1');
+  const [partySize, setPartySize] = useState<number>(DEFAULT_QUEUE_SIZE);
   const [loading, setLoading] = useState(false);
   const [resultText, setResultText] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<'idle' | 'connecting' | 'open' | 'closed'>(
@@ -48,7 +44,6 @@ export default function JoinQueueScreen({ navigation }: Props) {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
-  const [maxSize, setMaxSize] = useState<number>(DEFAULT_QUEUE_SIZE);
   const socketRef = useRef<WebSocket | null>(null);
   const inQueue = Boolean(joinedCode && partyId);
   const isWeb = Platform.OS === 'web';
@@ -74,7 +69,7 @@ export default function JoinQueueScreen({ navigation }: Props) {
       const joinResult = await joinQueue({
         code: trimmed,
         name,
-        size: Number.parseInt(size, 10) || undefined,
+        size: partySize,
       });
       setResultText(`You're number ${joinResult.position} in line. We'll keep this updated.`);
       setJoinedCode(trimmed);
@@ -85,52 +80,6 @@ export default function JoinQueueScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleCloseScanner = () => {
-    setScannerActive(false);
-    setScannerVisible(false);
-  };
-
-  const handleOpenScanner = async () => {
-    if (cameraPermission?.granted) {
-      setScannerVisible(true);
-      setScannerActive(true);
-      return;
-    }
-
-    if (cameraPermission && !cameraPermission.canAskAgain && !cameraPermission.granted) {
-      Alert.alert(
-        'Camera access needed',
-        'Enable camera permissions in your device settings to scan QR codes.'
-      );
-      return;
-    }
-
-    const permissionResult = await requestCameraPermission();
-    if (permissionResult?.granted) {
-      setScannerVisible(true);
-      setScannerActive(true);
-    } else {
-      Alert.alert(
-        'Camera access needed',
-        'Enable camera permissions in your device settings to scan QR codes.'
-      );
-    }
-  };
-
-  const handleBarcodeScanned = ({ data }: BarcodeScanningResult) => {
-    if (!scannerActive) {
-      return;
-    }
-    const scanned = typeof data === 'string' ? data.trim() : '';
-    if (!scanned) {
-      return;
-    }
-
-    setScannerActive(false);
-    setKey(scanned.toUpperCase().slice(-6)); // use last 6 chars as key
-    setScannerVisible(false);
   };
 
   const handleCloseScanner = () => {
@@ -436,7 +385,7 @@ export default function JoinQueueScreen({ navigation }: Props) {
 
             <Text style={styles.label}>Party Size</Text>
             <View style={styles.sliderRow}>
-              <Text style={styles.sliderValue}>{maxSize}</Text>
+              <Text style={styles.sliderValue}>{partySize}</Text>
               <Text style={styles.sliderHint}>guests</Text>
             </View>
             <Slider
@@ -444,11 +393,11 @@ export default function JoinQueueScreen({ navigation }: Props) {
               minimumValue={MIN_QUEUE_SIZE}
               maximumValue={MAX_QUEUE_SIZE}
               step={1}
-              value={maxSize}
+              value={partySize}
               minimumTrackTintColor="#1f6feb"
               maximumTrackTintColor="#d0d7de"
               thumbTintColor="#1f6feb"
-              onValueChange={(value) => setMaxSize(Math.round(value))}
+              onValueChange={(value) => setPartySize(Math.round(value))}
             />
 
             <View style={styles.actionsRow}>
