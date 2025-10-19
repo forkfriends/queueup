@@ -220,16 +220,13 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             }
             case 'removed': {
               const reason = data.reason;
-              const message =
-                reason === 'served'
-                  ? 'All set! You have been marked as served.'
-                  : reason === 'no_show'
-                    ? "We couldn't reach you, so you were removed from the queue."
-                    : reason === 'kicked'
-                      ? 'The host removed you from the queue.'
-                      : reason === 'closed'
-                        ? 'Queue closed. Thanks for your patience!'
-                        : 'You have left the queue.';
+              const reasonMessages: Record<string, string> = {
+                served: 'All set! You have been marked as served.',
+                no_show: "We couldn't reach you, so you were removed from the queue.",
+                kicked: 'The host removed you from the queue.',
+                closed: 'Queue closed. Thanks for your patience!',
+              };
+              const message = reasonMessages[reason as string] ?? 'You have left the queue.';
               resetSession(message);
               break;
             }
