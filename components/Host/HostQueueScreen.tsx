@@ -336,6 +336,10 @@ export default function HostQueueScreen({ route }: Props) {
         }
       });
 
+      // Prefer cacheDirectory for temporary storage of the QR code image before moving it to the user's photo library.
+      // cacheDirectory is used because the file only needs to persist long enough to be imported into MediaLibrary,
+      // and using cacheDirectory avoids cluttering documentDirectory with temporary files.
+      // If cacheDirectory is unavailable, fall back to documentDirectory.
       const directory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
       if (!directory) {
         throw new Error('No writable directory available to save the QR code.');
