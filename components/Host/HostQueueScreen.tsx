@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -65,6 +66,7 @@ export default function HostQueueScreen({ route }: Props) {
   const [closed, setClosed] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
+  const [closeConfirmVisibleWeb, setCloseConfirmVisibleWeb] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -251,38 +253,52 @@ export default function HostQueueScreen({ route }: Props) {
     advance();
   }, [advance]);
 
+  const performCloseQueue = useCallback(async () => {
+    if (!hasHostAuth || closeLoading || !hostToken) {
+      return;
+    }
+    setCloseLoading(true);
+    try {
+      await closeQueueHost({ code, hostAuthToken: hostToken });
+      setClosed(true);
+      setQueue([]);
+      setNowServing(null);
+      setConnectionError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to close queue';
+      Alert.alert('Unable to close queue', message);
+    } finally {
+      setCloseLoading(false);
+    }
+  }, [closeLoading, code, hasHostAuth, hostToken]);
+
   const handleCloseQueue = useCallback(() => {
     if (!hasHostAuth || closeLoading) {
       return;
     }
-    const confirmClose = () => {
-      setCloseLoading(true);
-  closeQueueHost({ code, hostAuthToken: hostToken as string })
-        .then(() => {
-          setClosed(true);
-          setQueue([]);
-          setNowServing(null);
-          setConnectionError(null);
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : 'Failed to close queue';
-          Alert.alert('Unable to close queue', message);
-        })
-        .finally(() => {
-          setCloseLoading(false);
-        });
-    };
-
+    if (Platform.OS === 'web') {
+      setCloseConfirmVisibleWeb(true);
+      return;
+    }
     Alert.alert(
       'Close Queue',
       'Guests will no longer be able to join once closed. Proceed?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Close Queue', style: 'destructive', onPress: confirmClose },
+        { text: 'Close Queue', style: 'destructive', onPress: () => void performCloseQueue() },
       ],
       { cancelable: true }
     );
-  }, [closeLoading, code, hasHostAuth, hostToken]);
+  }, [closeLoading, hasHostAuth, performCloseQueue]);
+
+  const confirmCloseQueueWeb = useCallback(() => {
+    setCloseConfirmVisibleWeb(false);
+    void performCloseQueue();
+  }, [performCloseQueue]);
+
+  const cancelCloseQueueWeb = useCallback(() => {
+    setCloseConfirmVisibleWeb(false);
+  }, []);
 
   const reconnectManually = useCallback(
     (event?: GestureResponderEvent) => {
@@ -424,6 +440,40 @@ export default function HostQueueScreen({ route }: Props) {
           </Pressable>
         </View>
       </View>
+      {Platform.OS === 'web' ? (
+        <Modal
+          visible={closeConfirmVisibleWeb}
+          transparent
+          animationType="fade"
+          onRequestClose={cancelCloseQueueWeb}>
+          <View style={styles.webModalBackdrop}>
+            <View style={styles.webModalCard}>
+              <Text style={styles.webModalTitle}>Close Queue</Text>
+              <Text style={styles.webModalMessage}>
+                Guests will no longer be able to join once closed. Proceed?
+              </Text>
+              <View style={styles.webModalActions}>
+                <Pressable style={styles.webModalCancelButton} onPress={cancelCloseQueueWeb}>
+                  <Text style={styles.webModalCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.webModalConfirmButton,
+                    closeLoading ? styles.webModalConfirmButtonDisabled : undefined,
+                  ]}
+                  onPress={confirmCloseQueueWeb}
+                  disabled={closeLoading}>
+                  {closeLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.webModalConfirmText}>Close Queue</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
     </SafeAreaProvider>
   );
 }

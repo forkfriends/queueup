@@ -438,7 +438,10 @@ function applyCors(
     headers.set('Access-Control-Expose-Headers', exposeHeaders.join(', '));
   }
   if (isPreflight) {
-    headers.set('Access-Control-Allow-Headers', 'content-type, cf-connecting-ip, authorization');
+    headers.set(
+      'Access-Control-Allow-Headers',
+      'content-type, cf-connecting-ip, authorization, x-host-auth'
+    );
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set('Access-Control-Max-Age', '600');
   }
@@ -502,9 +505,20 @@ async function requireHostAuth(
   sessionId: string,
   env: Env
 ): Promise<string | Response> {
+  const headerToken = request.headers.get('x-host-auth');
+  if (headerToken) {
+    const headerValid = await verifyHostCookie(headerToken, sessionId, env.HOST_AUTH_SECRET);
+    if (headerValid) {
+      return headerToken;
+    }
+  }
+
   const cookies = parseCookies(request.headers.get('Cookie'));
   const cookieValue = cookies.get(HOST_COOKIE_NAME);
   if (!cookieValue) {
+    if (headerToken) {
+      return jsonError('Invalid host authentication', 403);
+    }
     return jsonError('Host authentication required', 401);
   }
 
