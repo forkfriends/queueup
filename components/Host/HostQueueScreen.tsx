@@ -545,12 +545,12 @@ export default function HostQueueScreen({ route }: Props) {
             <Copy style={styles.headerCopyText} size={14}/>
           </Pressable>
         </View>
-        <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
+        {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
         {shareableLink ? (
           <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
             Guest link: {shareableLink}
           </Text>
-        ) : null}
+        ) : null} */}
         <View style={styles.statusRow}>
           <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
             {closed ? 'Closed' : 'Active'}
