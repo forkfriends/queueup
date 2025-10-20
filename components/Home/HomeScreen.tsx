@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, Image, Pressable } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, Image, Pressable, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
@@ -8,6 +8,34 @@ import styles from './HomeScreen.Styles';
 type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 
 export default function HomeScreen({ navigation }: Props) {
+  const handledPrefillRef = useRef(false);
+
+  useEffect(() => {
+    if (handledPrefillRef.current) {
+      return;
+    }
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    const search = window.location.search;
+    if (!search) {
+      return;
+    }
+    const params = new URLSearchParams(search);
+    const joinCode = params.get('code');
+    if (!joinCode) {
+      return;
+    }
+    const normalized = joinCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(normalized)) {
+      return;
+    }
+    handledPrefillRef.current = true;
+    navigation.navigate('JoinQueueScreen', { id: 'link', code: normalized });
+    const cleanedUrl = `${window.location.origin}${window.location.pathname}${window.location.hash}`;
+    window.history.replaceState({}, document.title, cleanedUrl);
+  }, [navigation]);
+
   return (
     <SafeAreaProvider style={styles.safe}>
       <View style={styles.container}>

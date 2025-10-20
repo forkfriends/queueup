@@ -68,23 +68,16 @@ export default StyleSheet.create({
     fontWeight: '600',
     color: '#222',
   },
+  inputDisabled: {
+    backgroundColor: '#f1f1f1',
+    color: '#777',
+  },
   actionsRow: {
     marginTop: 22,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  cancelText: {
-    fontSize: 18,
-    fontWeight: '500',
-    color: '#222',
-  },
-  cancelBox: {
-    marginRight: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    gap: 12,
   },
   button: {
     backgroundColor: '#222',
@@ -94,10 +87,24 @@ export default StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  leaveButton: {
+    backgroundColor: '#c1121f',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leaveButtonDisabled: {
+    opacity: 0.6,
   },
   resultCard: {
     marginTop: 24,
@@ -144,5 +151,67 @@ export default StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#111',
+  },
+  webModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  webModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    padding: 20,
+    gap: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  webModalTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#111',
+  },
+  webModalMessage: {
+    fontSize: 15,
+    color: '#444',
+    lineHeight: 21,
+  },
+  webModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  webModalCancelButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    backgroundColor: '#f5f5f5',
+  },
+  webModalCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+  webModalConfirmButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#c1121f',
+  },
+  webModalConfirmButtonDisabled: {
+    opacity: 0.6,
+  },
+  webModalConfirmText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

@@ -5,11 +5,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FAF9FA',
   },
-  container: {
+  containerFixed: {
     flex: 1,
+  },
+  containerContent: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: 32,
     gap: 16,
+    flexGrow: 1,
+  },
+  mobileScroll: {
+    flex: 1,
   },
   headerCard: {
     borderRadius: 14,
@@ -84,14 +91,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   queueCard: {
-    flex: 1,
+    flexGrow: 1,
+    minHeight: 160,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#e6e6e6',
     backgroundColor: '#fff',
     overflow: 'hidden',
   },
-  queueScroll: {
+  queueList: {
+    flex: 1,
     paddingVertical: 8,
   },
   queueItem: {
@@ -205,6 +214,68 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#606060',
     textAlign: 'center',
+  },
+  webModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  webModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    padding: 20,
+    gap: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  webModalTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#111',
+  },
+  webModalMessage: {
+    fontSize: 15,
+    color: '#444',
+    lineHeight: 21,
+  },
+  webModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  webModalCancelButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    backgroundColor: '#f5f5f5',
+  },
+  webModalConfirmButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#c1121f',
+  },
+  webModalConfirmButtonDisabled: {
+    opacity: 0.6,
+  },
+  webModalCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+  webModalConfirmText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
   },
   qrActions: {
     width: '100%',

@@ -15,7 +15,10 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   TURNSTILE_BYPASS?: string;
   TEST_MODE?: string;
+  APP_BASE_URL?: string;
 }
+
+const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/queueup/';
 
 const ROUTE =
   /^\/api\/queue(?:\/(create|[A-Za-z0-9]{6})(?:\/(join|declare-nearby|leave|advance|kick|close|connect))?)?$/;
@@ -28,6 +31,27 @@ const MAX_QUEUE_CAPACITY = 100;
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    if (request.method === 'GET') {
+      const queueLinkMatch = /^\/queue\/([A-Za-z0-9]{6})$/.exec(url.pathname);
+      if (queueLinkMatch) {
+        const code = queueLinkMatch[1].toUpperCase();
+        const baseUrl =
+          env.APP_BASE_URL && env.APP_BASE_URL.trim().length > 0
+            ? env.APP_BASE_URL.trim()
+            : DEFAULT_APP_BASE_URL;
+        let redirectUrl: URL;
+        try {
+          redirectUrl = new URL(baseUrl);
+        } catch (error) {
+          console.warn('Invalid APP_BASE_URL, falling back to default');
+          redirectUrl = new URL(DEFAULT_APP_BASE_URL);
+        }
+        redirectUrl.searchParams.set('code', code);
+        return Response.redirect(redirectUrl.toString(), 302);
+      }
+    }
+
     const originResult = resolveAllowedOrigin(request, url, env);
     if (originResult instanceof Response) {
       return originResult;
@@ -438,7 +462,10 @@ function applyCors(
     headers.set('Access-Control-Expose-Headers', exposeHeaders.join(', '));
   }
   if (isPreflight) {
-    headers.set('Access-Control-Allow-Headers', 'content-type, cf-connecting-ip, authorization');
+    headers.set(
+      'Access-Control-Allow-Headers',
+      'content-type, cf-connecting-ip, authorization, x-host-auth'
+    );
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set('Access-Control-Max-Age', '600');
   }
@@ -502,9 +529,20 @@ async function requireHostAuth(
   sessionId: string,
   env: Env
 ): Promise<string | Response> {
+  const headerToken = request.headers.get('x-host-auth');
+  if (headerToken) {
+    const headerValid = await verifyHostCookie(headerToken, sessionId, env.HOST_AUTH_SECRET);
+    if (headerValid) {
+      return headerToken;
+    }
+  }
+
   const cookies = parseCookies(request.headers.get('Cookie'));
   const cookieValue = cookies.get(HOST_COOKIE_NAME);
   if (!cookieValue) {
+    if (headerToken) {
+      return jsonError('Invalid host authentication', 403);
+    }
     return jsonError('Host authentication required', 401);
   }
 
