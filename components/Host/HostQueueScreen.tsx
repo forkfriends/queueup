@@ -666,21 +666,6 @@ export default function HostQueueScreen({ route }: Props) {
         </View>
       ) : null}
 
-      <View style={styles.nowServingCard}>
-        <Text style={styles.nowServingHeading}>Now Serving</Text>
-        <Text style={styles.nowServingValue}>
-          {nowServing
-            ? `${nowServing.name?.trim() || 'Guest'}${
-                nowServing.size ? ` (${nowServing.size})` : ''
-              }`
-            : 'No party currently called.'}
-        </Text>
-      </View>
-
-      <View style={styles.queueCard}>
-        <View style={styles.queueList}>{renderQueueList()}</View>
-      </View>
-
       <View style={styles.queueActionsRow}>
         <Pressable
           style={[styles.primaryButton, disabledAdvance ? styles.primaryButtonDisabled : undefined]}
@@ -705,6 +690,21 @@ export default function HostQueueScreen({ route }: Props) {
             <Text style={styles.buttonText}>Close Queue</Text>
           )}
         </Pressable>
+      </View>
+
+      <View style={styles.nowServingCard}>
+        <Text style={styles.nowServingHeading}>Now Serving</Text>
+        <Text style={styles.nowServingValue}>
+          {nowServing
+            ? `${nowServing.name?.trim() || 'Guest'}${
+                nowServing.size ? ` (${nowServing.size})` : ''
+              }`
+            : 'No party currently called.'}
+        </Text>
+      </View>
+
+      <View style={styles.queueCard}>
+        <View style={styles.queueList}>{renderQueueList()}</View>
       </View>
     </>
   );
