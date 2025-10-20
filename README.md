@@ -1,55 +1,48 @@
 # QueueUp
 
-10/8 - Replicated Figma UI
-Todo - Make Submit logic for textfields if necessary for prototype and find other requirements for our app
+QueueUp is a real-time queueing companion for pop-up events, meet-and-greets, and walk-in experiences. Hosts spin up a queue in seconds, guests join with a scan or short code, and everyone gets live updates as the line moves.
 
-## Backend quickstart (Cloudflare Workers)
+## What Makes QueueUp Useful
+- Live queue state is powered by Cloudflare Durable Objects, so everyone sees the same order instantly.
+- Hosts control capacity, advance parties, and close the queue from a dedicated console.
+- Guests join from the mobile app or web and receive their place in line immediately.
+- Built with Expo + React Native, so the same codebase runs on iOS, Android, and the web.
 
-All server code lives in `api/`. To run or deploy the worker locally you need Wrangler ≥4.42.
+## How QueueUp Flows
+1. Create a queue from the Make Queue screen, set an event name, and share the automatically generated join link or QR code.
+2. Guests open the app, select Join Queue, and scan the QR code or enter the short code to secure their spot.
+3. Hosts watch the queue update in real time, advance or remove parties, and close things out once the event wraps.
 
-1. Install dependencies (only once):
-   ```sh
-   npm install
-   ```
-2. Authenticate and provision Cloudflare resources (only once per account):
-   ```sh
-   npx wrangler login
-   npx wrangler d1 create queueup-db
-   npx wrangler kv namespace create QUEUE_KV
-   npx wrangler kv namespace create QUEUE_KV --preview
-   ```
-   Update `api/wrangler.toml` with the IDs printed by Wrangler.
-3. Register secrets (use your real values; the Turnstile test secret works during dev):
-   ```sh
-   npx wrangler secret put TURNSTILE_SECRET_KEY --config api/wrangler.toml
-   npx wrangler secret put HOST_AUTH_SECRET --config api/wrangler.toml
-   ```
-4. Apply the initial D1 migration:
-   ```sh
-   npm run migrate:apply
-   ```
-5. Run the worker locally or deploy:
-  ```sh
-  npx wrangler dev --config api/wrangler.toml   # local dev
-  npx wrangler deploy --config api/wrangler.toml
-  ```
+## Screenshots
+| Home | Host Console |
+| --- | --- |
+| ![QueueUp home screen showing entry points for hosting or joining a queue](./assets/home.png) | ![Host console managing live queue with actions to advance and close](./assets/hostconsole.png) |
+
+| Join Queue | Make Queue |
+| --- | --- |
+| ![Join Queue screen prompting for QR scan or code entry](./assets/joinqueue.png) | ![Make Queue screen configuring event details and capacity](./assets/makequeue.png) |
+
+## Getting Started
+- **Prerequisites:** Node.js 20+, npm, and an iOS/Android emulator or physical device if you plan to run the mobile client. A free Cloudflare account is required for the backend.
+- **Install dependencies:** `npm install`
+- **Run the Expo app:** `npm run start` (then pick your platform in the Expo CLI). Use `npm run ios` or `npm run android` for direct simulator/emulator launches.
+- **Configure the API base URL:** Set `EXPO_PUBLIC_API_BASE_URL` in `.env` (or your shell) to your deployed Worker origin, e.g.\
+  `EXPO_PUBLIC_API_BASE_URL=https://queueup-api.example.workers.dev`\
+  When unset, the app points at `http://localhost:8787` (`127.0.0.1` on iOS simulators, `10.0.2.2` on Android emulators) to match Wrangler's dev tunnel.
+
+## Backend Setup
+The Cloudflare Worker that powers QueueUp lives in `api/`. Follow the step-by-step backend guide in [docs/BACKEND-QUICKSTART.md](docs/BACKEND-QUICKSTART.md) to provision D1, KV, secrets, and run migrations.
 
 ## Testing
-
-We use Vitest plus `@cloudflare/vitest-pool-workers` to execute tests inside a Workers runtime. Run the full suite with:
+Run the Vitest suite—backed by `@cloudflare/vitest-pool-workers`—with:
 
 ```sh
 npm run test
 ```
 
-This covers both unit helpers and an end-to-end Durable Object flow (queue creation, join, WebSocket fan-out, advance/alarms, close). Use `npm run test:watch` for quick feedback during development.
+Use `npm run test:watch` for faster feedback while iterating.
 
-### Mobile client configuration
-
-Set `EXPO_PUBLIC_API_BASE_URL` in your environment (or `.env`) to the deployed Worker origin, e.g.
-
-```
-EXPO_PUBLIC_API_BASE_URL=https://queueup-api.danielnwachukwu.workers.dev
-```
-
-If unset, the app defaults to `http://localhost:8787` (`127.0.0.1` on iOS simulator, `10.0.2.2` on Android emulator) which matches Wrangler's dev server.
+## Learn More
+- Architecture deep dive: `docs/ARCHITECTURE.md`
+- API contract: `docs/API.md`
+- Deploying the web front end: `.github/workflows/deploy-gh-pages.yml`
