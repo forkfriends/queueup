@@ -134,9 +134,7 @@ export default function HostQueueScreen({ route }: Props) {
     try {
       const parsed = JSON.parse(event.data) as HostMessage;
       if (parsed.type === 'queue_update') {
-        const queueEntries = Array.isArray(parsed.queue)
-          ? (parsed.queue as HostParty[])
-          : [];
+        const queueEntries = Array.isArray(parsed.queue) ? (parsed.queue as HostParty[]) : [];
         const serving = (parsed.nowServing ?? null) as HostParty | null;
         setQueue(queueEntries);
         setNowServing(serving);
@@ -200,21 +198,14 @@ export default function HostQueueScreen({ route }: Props) {
         }, RECONNECT_DELAY_MS);
       }
     };
-  }, [
-    hasHostAuth,
-    clearReconnectTimeout,
-    closeSocket,
-    webSocketUrl,
-    handleMessage,
-    closed,
-  ]);
+  }, [hasHostAuth, clearReconnectTimeout, closeSocket, webSocketUrl, handleMessage, closed]);
 
   useEffect(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
       setConnectionError(
         'Missing host authentication. Reopen the host controls on the device that created this queue.'
-       );
+      );
       return;
     }
     connect();
@@ -259,7 +250,7 @@ export default function HostQueueScreen({ route }: Props) {
         setActionLoading(false);
       }
     },
-  [actionLoading, code, hasHostAuth, hostToken, nowServing?.id]
+    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id]
   );
 
   const advanceSpecific = useCallback(
@@ -531,80 +522,86 @@ export default function HostQueueScreen({ route }: Props) {
     });
   };
 
-  return (
-    <SafeAreaProvider style={styles.safe}>
-      <View style={styles.container}>
-        <View style={styles.headerCard}>
-          <Text style={styles.headerTitle}>Host Console</Text>
-          {displayEventName ? (
-            <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
-              {displayEventName}
-            </Text>
-          ) : null}
-          {typeof capacity === 'number' ? (
-            <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
-          ) : null}
-          <Text style={styles.headerLine}>Queue code: {code}</Text>
-          <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
-          {shareableLink ? (
-            <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
-              Guest link: {shareableLink}
-            </Text>
-          ) : null}
-          <View style={styles.statusRow}>
-            <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
-              {closed ? 'Closed' : 'Active'}
-            </Text>
-            <Text style={styles.connectionText}>Connection: {connectionLabel}</Text>
-          </View>
-          {connectionError ? (
-            <>
-              <Text style={styles.connectionText}>{connectionError}</Text>
-              {hasHostAuth ? (
-                <Pressable style={styles.reconnectButton} onPress={reconnectManually}>
-                  <Text style={styles.reconnectButtonText}>Reconnect</Text>
-                </Pressable>
-              ) : null}
-            </>
-          ) : null}
-          {!hasHostAuth ? (
-            <Text style={styles.connectionText}>
-              Host authentication token missing. Create a queue on this device to control it.
-            </Text>
-          ) : null}
+  const content = (
+    <>
+      <View style={styles.headerCard}>
+        <Text style={styles.headerTitle}>Host Console</Text>
+        {displayEventName ? (
+          <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
+            {displayEventName}
+          </Text>
+        ) : null}
+        {typeof capacity === 'number' ? (
+          <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
+        ) : null}
+        <View style={styles.headerCodeRow}>
+          <Text style={styles.headerLine}>Queue code:</Text>
+          <Text style={styles.headerCodeValue}>{code}</Text>
+          <Pressable
+            style={styles.headerCopyButton}
+            onPress={handleCopyCode}
+            accessibilityRole="button"
+            accessibilityLabel="Copy queue code to clipboard">
+            <Copy style={styles.headerCopyText} size={14}/>
+          </Pressable>
         </View>
+        <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
+        {shareableLink ? (
+          <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
+            Guest link: {shareableLink}
+          </Text>
+        ) : null}
+        <View style={styles.statusRow}>
+          <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
+            {closed ? 'Closed' : 'Active'}
+          </Text>
+          <Text style={styles.connectionText}>Connection: {connectionLabel}</Text>
+        </View>
+        {connectionError ? (
+          <>
+            <Text style={styles.connectionText}>{connectionError}</Text>
+            {hasHostAuth ? (
+              <Pressable style={styles.reconnectButton} onPress={reconnectManually}>
+                <Text style={styles.reconnectButtonText}>Reconnect</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+        {!hasHostAuth ? (
+          <Text style={styles.connectionText}>
+            Host authentication token missing. Create a queue on this device to control it.
+          </Text>
+        ) : null}
+      </View>
 
       {shareableLink ? (
         <View style={styles.qrCard}>
           <Text style={styles.qrHeading}>Guest QR Code</Text>
           <View style={styles.qrCodeWrapper}>
             <QRCode
-                value={shareableLink}
-                size={180}
-                getRef={(ref) => {
-                  qrCodeRef.current = ref;
-                }}
-              />
+              value={shareableLink}
+              size={180}
+              getRef={(ref) => {
+                qrCodeRef.current = ref;
+              }}
+            />
           </View>
           <Text style={styles.qrHint}>Have guests scan to join instantly.</Text>
-            <View style={styles.qrActions}>
-              <Pressable style={styles.qrShareButton} onPress={handleShareQr}>
-                <Text style={styles.qrShareText}>Share QR Link</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.qrSaveButton,
-                  savingQr ? styles.qrButtonDisabled : undefined,
-                ]}
-                onPress={handleSaveQr}
-                disabled={savingQr}>
-                {savingQr ? (
-                  <ActivityIndicator color="#111" />
-                ) : (
-                  <Text style={styles.qrSaveText}>Save to Photos</Text>
-                )}
-              </Pressable>
-            </View>
+          <View style={styles.qrActions}>
+            <Pressable style={styles.qrShareButton} onPress={handleShareQr}>
+              <Text style={styles.qrShareText}>Share QR Link</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.qrSaveButton, savingQr ? styles.qrButtonDisabled : undefined]}
+              onPress={handleSaveQr}
+              disabled={savingQr}>
+              {savingQr ? (
+                <ActivityIndicator color="#111" />
+              ) : (
+                <Text style={styles.qrSaveText}>Save to Photos</Text>
+              )}
+            </Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -612,9 +609,15 @@ export default function HostQueueScreen({ route }: Props) {
         <Text style={styles.nowServingHeading}>Now Serving</Text>
         <Text style={styles.nowServingValue}>
           {nowServing
-            ? `${nowServing.name?.trim() || 'Guest'}${nowServing.size ? ` (${nowServing.size})` : ''}`
+            ? `${nowServing.name?.trim() || 'Guest'}${
+                nowServing.size ? ` (${nowServing.size})` : ''
+              }`
             : 'No party currently called.'}
         </Text>
+      </View>
+
+      <View style={styles.queueCard}>
+        <View style={styles.queueList}>{renderQueueList()}</View>
       </View>
 
       <View style={styles.queueActionsRow}>
@@ -641,10 +644,6 @@ export default function HostQueueScreen({ route }: Props) {
             <Text style={styles.buttonText}>Close Queue</Text>
           )}
         </Pressable>
-      </View>
-
-      <View style={styles.queueCard}>
-        <View style={styles.queueList}>{renderQueueList()}</View>
       </View>
     </>
   );
