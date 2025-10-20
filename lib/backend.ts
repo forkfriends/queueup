@@ -114,6 +114,23 @@ export async function joinQueue({ code, name, size }: JoinQueueParams): Promise<
   return (await response.json()) as JoinQueueResult;
 }
 
+export interface LeaveQueueParams {
+  code: string;
+  partyId: string;
+}
+
+export async function leaveQueue({ code, partyId }: LeaveQueueParams): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/leave`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ partyId }),
+  });
+
+  if (!response.ok) {
+    throw await buildError(response);
+  }
+}
+
 function toWebSocketUrl(url: string): string {
   if (WEBSOCKET_PROTOCOL_HTTPS.test(url)) {
     return url.replace(WEBSOCKET_PROTOCOL_HTTPS, 'wss:');
