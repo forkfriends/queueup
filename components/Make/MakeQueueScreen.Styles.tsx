@@ -79,8 +79,39 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   timeValue: {
+    flex: 1,
     fontSize: 18,
     fontWeight: '600',
+  },
+  timeStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timeStepperButtons: {
+    marginLeft: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d0d0d0',
+    overflow: 'hidden',
+  },
+  timeStepperButton: {
+    paddingVertical: 2,
+    paddingHorizontal: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  timeStepperButtonTop: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#d0d0d0',
+  },
+  timeStepperButtonDisabled: {
+    opacity: 0.4,
+  },
+  timeStepperIcon: {
+    fontSize: 8,
+    fontWeight: '600',
+    color: '#222',
   },
   timePickerContainer: {
     marginTop: 12,

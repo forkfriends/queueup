@@ -50,6 +50,12 @@ function formatTime(date: Date): string {
   return `${hours12}:${minuteString} ${period}`;
 }
 
+function formatTimeInputValue(date: Date): string {
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
 export default function MakeQueueScreen({ navigation }: Props) {
   const [eventName, setEventName] = useState('');
   const [location, setLocation] = useState('');
@@ -120,6 +126,63 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const handleDismissPicker = useCallback(() => {
     setActivePicker(null);
   }, []);
+
+  const adjustTimeByMinutes = useCallback(
+    (field: TimeField, deltaMinutes: number) => {
+      const source = field === 'open' ? openTime : closeTime;
+      const currentMinutes = source.getHours() * 60 + source.getMinutes();
+      const nextMinutes = Math.min(Math.max(currentMinutes + deltaMinutes, 0), 23 * 60 + 45);
+      if (nextMinutes === currentMinutes) {
+        return;
+      }
+      const adjusted = new Date(source);
+      adjusted.setHours(Math.floor(nextMinutes / 60), nextMinutes % 60, 0, 0);
+      applyTimeChange(field, adjusted);
+    },
+    [applyTimeChange, closeTime, openTime]
+  );
+
+  const renderWebTimeInput = (field: TimeField, label: string) => {
+    const value = field === 'open' ? openTime : closeTime;
+    const totalMinutes = value.getHours() * 60 + value.getMinutes();
+    const canDecrease = totalMinutes > 0;
+    const canIncrease = totalMinutes < 23 * 60 + 45;
+
+    return (
+      <View
+        style={[styles.timeInput, field === 'open' ? styles.timeInputLeft : styles.timeInputRight]}>
+        <Text style={styles.timeLabel}>{label}</Text>
+        <View style={styles.timeStepperRow}>
+          <Text style={styles.timeValue}>{formatTimeInputValue(value)}</Text>
+          <View style={styles.timeStepperButtons}>
+            <Pressable
+              style={[
+                styles.timeStepperButton,
+                styles.timeStepperButtonTop,
+                !canIncrease ? styles.timeStepperButtonDisabled : undefined,
+              ]}
+              onPress={() => adjustTimeByMinutes(field, 15)}
+              disabled={!canIncrease}
+              accessibilityRole="button"
+              accessibilityLabel={`Increase ${label.toLowerCase()} time`}>
+              <Text style={styles.timeStepperIcon}>▲</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.timeStepperButton,
+                !canDecrease ? styles.timeStepperButtonDisabled : undefined,
+              ]}
+              onPress={() => adjustTimeByMinutes(field, -15)}
+              disabled={!canDecrease}
+              accessibilityRole="button"
+              accessibilityLabel={`Decrease ${label.toLowerCase()} time`}>
+              <Text style={styles.timeStepperIcon}>▼</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  };
 
   const onSubmit = async () => {
     if (loading) return;
@@ -212,22 +275,29 @@ export default function MakeQueueScreen({ navigation }: Props) {
 
             {/* Open Hours */}
             <Text style={styles.label}>Open Hours</Text>
-            <View style={styles.timeRow}>
-              <Pressable
-                style={[styles.timeInput, styles.timeInputLeft]}
-                onPress={() => handleTimePress('open')}
-                accessibilityRole="button">
-                <Text style={styles.timeLabel}>Opens</Text>
-                <Text style={styles.timeValue}>{formatTime(openTime)}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.timeInput, styles.timeInputRight]}
-                onPress={() => handleTimePress('close')}
-                accessibilityRole="button">
-                <Text style={styles.timeLabel}>Closes</Text>
-                <Text style={styles.timeValue}>{formatTime(closeTime)}</Text>
-              </Pressable>
-            </View>
+            {Platform.OS === 'web' ? (
+              <View style={styles.timeRow}>
+                {renderWebTimeInput('open', 'Opens')}
+                {renderWebTimeInput('close', 'Closes')}
+              </View>
+            ) : (
+              <View style={styles.timeRow}>
+                <Pressable
+                  style={[styles.timeInput, styles.timeInputLeft]}
+                  onPress={() => handleTimePress('open')}
+                  accessibilityRole="button">
+                  <Text style={styles.timeLabel}>Opens</Text>
+                  <Text style={styles.timeValue}>{formatTime(openTime)}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.timeInput, styles.timeInputRight]}
+                  onPress={() => handleTimePress('close')}
+                  accessibilityRole="button">
+                  <Text style={styles.timeLabel}>Closes</Text>
+                  <Text style={styles.timeValue}>{formatTime(closeTime)}</Text>
+                </Pressable>
+              </View>
+            )}
 
             {Platform.OS === 'ios' && activePicker ? (
               <View style={styles.timePickerContainer}>
