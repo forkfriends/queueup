@@ -302,6 +302,59 @@ export default function HostQueueScreen({ route }: Props) {
       return;
     }
 
+    if (isWeb) {
+      setSavingQr(true);
+      try {
+        if (typeof qrCodeRef.current?.toDataURL !== 'function') {
+          throw new Error('Saving QR codes is not supported on this browser.');
+        }
+
+        const base64 = await new Promise<string>((resolve, reject) => {
+          let settled = false;
+          const timeout = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              reject(new Error('Timed out generating QR image data.'));
+            }
+          }, 3000);
+
+          try {
+            qrCodeRef.current?.toDataURL?.((data: string) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timeout);
+              resolve(data);
+            });
+          } catch (err) {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timeout);
+              reject(err);
+            }
+          }
+        });
+
+        const dataUrl = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = `queue-${code}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(objectUrl);
+        Alert.alert('Saved', 'QR code downloaded. Check your browser downloads.');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to download QR code.';
+        Alert.alert('Download failed', message);
+      } finally {
+        setSavingQr(false);
+      }
+      return;
+    }
+
     const ensurePermission = async (): Promise<MediaPermissionOutcome> => {
       try {
         let currentPermission = mediaPermission ?? (await getMediaPermission());
@@ -428,7 +481,15 @@ export default function HostQueueScreen({ route }: Props) {
     } finally {
       setSavingQr(false);
     }
-  }, [code, getMediaPermission, mediaPermission, requestMediaPermission, savingQr, shareableLink]);
+  }, [
+    code,
+    getMediaPermission,
+    isWeb,
+    mediaPermission,
+    requestMediaPermission,
+    savingQr,
+    shareableLink,
+  ]);
 
   const performCloseQueue = useCallback(async () => {
     if (!hasHostAuth || closeLoading || !hostToken) {
@@ -542,7 +603,7 @@ export default function HostQueueScreen({ route }: Props) {
             onPress={handleCopyCode}
             accessibilityRole="button"
             accessibilityLabel="Copy queue code to clipboard">
-            <Copy style={styles.headerCopyText} size={14}/>
+            <Copy style={styles.headerCopyText} size={14} />
           </Pressable>
         </View>
         {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
