@@ -44,6 +44,32 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#444',
   },
+  headerCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  headerCodeValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111',
+  },
+  headerCopyButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d0d0d0',
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCopyText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#222',
+  },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
