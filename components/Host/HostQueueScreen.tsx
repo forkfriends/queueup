@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
   Share,
   Text,
+  ToastAndroid,
   View,
   type GestureResponderEvent,
 } from 'react-native';
@@ -14,6 +16,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as FileSystem from 'expo-file-system';
+import * as Clipboard from 'expo-clipboard';
 import * as MediaLibrary from 'expo-media-library';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './HostQueueScreen.Styles';
@@ -23,6 +26,7 @@ import {
   HostParty,
   buildHostConnectUrl,
 } from '../../lib/backend';
+import { Copy } from 'lucide-react-native';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
@@ -37,6 +41,10 @@ const RECONNECT_DELAY_MS = 3000;
 type QRCodeRef = {
   toDataURL?: (callback: (data: string) => void) => void;
 };
+
+type MediaPermissionOutcome =
+  | { status: 'granted'; access: MediaLibrary.PermissionResponse['accessPrivileges'] | undefined }
+  | { status: 'denied' | 'blocked' };
 
 export default function HostQueueScreen({ route }: Props) {
   const {
@@ -94,7 +102,9 @@ export default function HostQueueScreen({ route }: Props) {
 
   const webSocketUrl = useMemo(() => buildHostConnectUrl(wsUrl, hostToken), [wsUrl, hostToken]);
   const hasHostAuth = Boolean(hostToken);
-  const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
+  const [mediaPermission, requestMediaPermission, getMediaPermission] = MediaLibrary.usePermissions(
+    Platform.OS === 'android' ? { writeOnly: true } : undefined
+  );
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeout.current) {
@@ -261,6 +271,20 @@ export default function HostQueueScreen({ route }: Props) {
     advance();
   }, [advance]);
 
+  const handleCopyCode = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(code);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Queue code copied', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Copied', 'Queue code copied to clipboard.');
+      }
+    } catch (error) {
+      console.warn('Failed to copy queue code', error);
+      Alert.alert('Copy failed', 'Unable to copy the queue code. Try again.');
+    }
+  }, [code]);
+
   const handleShareQr = useCallback(async () => {
     if (!shareableLink) {
       return;
@@ -285,25 +309,57 @@ export default function HostQueueScreen({ route }: Props) {
       return;
     }
 
-    const ensurePermission = async () => {
-      if (mediaPermission?.granted) {
-        return true;
-      }
+    const ensurePermission = async (): Promise<MediaPermissionOutcome> => {
       try {
-        // Use requestMediaPermission consistently for requesting media permissions.
-        const response = await requestMediaPermission();
-        return response?.granted ?? false;
+        let currentPermission = mediaPermission ?? (await getMediaPermission());
+        if (currentPermission?.granted) {
+          return { status: 'granted', access: currentPermission.accessPrivileges };
+        }
+
+        if (!currentPermission || currentPermission.canAskAgain) {
+          const response = await requestMediaPermission();
+          if (response?.granted) {
+            return { status: 'granted', access: response.accessPrivileges };
+          }
+          currentPermission = response;
+        }
+
+        return currentPermission?.canAskAgain === false
+          ? { status: 'blocked' }
+          : { status: 'denied' };
       } catch (err) {
         console.warn('Media permission request failed', err);
-        return false;
+        return { status: 'denied' };
       }
     };
 
-    const hasPermission = await ensurePermission();
-    if (!hasPermission) {
-      Alert.alert('Access needed', 'Allow photo library access to save the QR code image.');
+    const permissionResult = await ensurePermission();
+    if (permissionResult.status !== 'granted') {
+      if (permissionResult.status === 'blocked') {
+        const openSettingsAvailable = typeof Linking.openSettings === 'function';
+        Alert.alert(
+          'Access needed',
+          'Enable photo access in Settings to save the QR code image.',
+          openSettingsAvailable
+            ? [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Open Settings',
+                  onPress: () => {
+                    Linking.openSettings();
+                  },
+                },
+              ]
+            : [{ text: 'OK', style: 'default' }],
+          { cancelable: true }
+        );
+      } else {
+        Alert.alert('Access needed', 'Allow photo library access to save the QR code image.');
+      }
       return;
     }
+    const accessLevel = permissionResult.access ?? 'all';
+    const canManageAlbums = accessLevel === 'all';
 
     setSavingQr(true);
     try {
@@ -348,12 +404,29 @@ export default function HostQueueScreen({ route }: Props) {
       await FileSystem.writeAsStringAsync(fileUri, base64, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      const asset = await MediaLibrary.createAssetAsync(fileUri);
-      const album = await MediaLibrary.getAlbumAsync('QueueUp');
-      if (album) {
-        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      if (!canManageAlbums) {
+        await MediaLibrary.saveToLibraryAsync(fileUri);
       } else {
-        await MediaLibrary.createAlbumAsync('QueueUp', asset, false);
+        let asset: MediaLibrary.Asset | null = null;
+        try {
+          asset = await MediaLibrary.createAssetAsync(fileUri);
+        } catch (assetError) {
+          console.warn('createAssetAsync failed, falling back to saveToLibraryAsync', assetError);
+          await MediaLibrary.saveToLibraryAsync(fileUri);
+        }
+
+        if (asset) {
+          try {
+            const album = await MediaLibrary.getAlbumAsync('QueueUp');
+            if (album) {
+              await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+            } else {
+              await MediaLibrary.createAlbumAsync('QueueUp', asset, false);
+            }
+          } catch (albumError) {
+            console.warn('Unable to update QueueUp album', albumError);
+          }
+        }
       }
       Alert.alert('Saved', 'QR code saved to your photos.');
     } catch (error) {
@@ -362,7 +435,7 @@ export default function HostQueueScreen({ route }: Props) {
     } finally {
       setSavingQr(false);
     }
-  }, [code, mediaPermission, requestMediaPermission, savingQr, shareableLink]);
+  }, [code, getMediaPermission, mediaPermission, requestMediaPermission, savingQr, shareableLink]);
 
   const handleCloseQueue = useCallback(() => {
     if (!hasHostAuth || closeLoading) {
@@ -455,7 +528,18 @@ export default function HostQueueScreen({ route }: Props) {
           {typeof capacity === 'number' ? (
             <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
           ) : null}
-          <Text style={styles.headerLine}>Queue code: {code}</Text>
+          <View style={styles.headerCodeRow}>
+            <Text style={styles.headerLine}>Queue code:</Text>
+            <Text style={styles.headerCodeValue}>{code}</Text>
+            <Pressable
+              style={styles.headerCopyButton}
+              onPress={handleCopyCode}
+              accessibilityRole="button"
+              accessibilityLabel="Copy queue code to clipboard"
+            >
+              <Copy style={styles.headerCopyText} size={14} />
+            </Pressable>
+          </View>
           <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
           {shareableLink ? (
             <Text style={styles.headerLine} numberOfLines={1} ellipsizeMode="middle">
