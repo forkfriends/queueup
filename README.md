@@ -29,7 +29,7 @@ QueueUp is a real-time queueing companion for pop-up events, meet-and-greets, an
 - **Configure the API base URL:** Set `EXPO_PUBLIC_API_BASE_URL` in `.env` (or your shell) to your deployed Worker origin, e.g.\
   `EXPO_PUBLIC_API_BASE_URL=https://queueup-api.example.workers.dev`\
   When unset, the app points at `http://localhost:8787` (`127.0.0.1` on iOS simulators, `10.0.2.2` on Android emulators) to match Wrangler's dev tunnel.
-
+## change
 ## Backend Setup
 The Cloudflare Worker that powers QueueUp lives in `api/`. Follow the step-by-step backend guide in [docs/BACKEND-QUICKSTART.md](docs/BACKEND-QUICKSTART.md) to provision D1, KV, secrets, and run migrations.
 
