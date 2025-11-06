@@ -97,11 +97,21 @@ export default function HostQueueScreen({ route }: Props) {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       try {
         window.sessionStorage.setItem(storageKey, initialHostAuthToken);
+        // Store the full queue details
+        window.sessionStorage.setItem('queueup-active-queue', JSON.stringify({
+          code,
+          sessionId,
+          wsUrl,
+          hostAuthToken: initialHostAuthToken,
+          joinUrl,
+          eventName,
+          maxGuests: initialMaxGuests
+        }));
       } catch {
-        // Ignore storage errors in restricted environments
+        // Ignore storage errors (e.g. private mode)
       }
     }
-  }, [initialHostAuthToken, storageKey]);
+  }, [initialHostAuthToken, storageKey, code, sessionId, wsUrl, joinUrl, eventName, initialMaxGuests]);
 
   const webSocketUrl = useMemo(() => buildHostConnectUrl(wsUrl, hostToken), [wsUrl, hostToken]);
   const hasHostAuth = Boolean(hostToken);

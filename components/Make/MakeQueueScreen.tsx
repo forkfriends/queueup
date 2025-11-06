@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { storage } from '../../utils/storage';
 import {
   ScrollView,
   View,
@@ -198,14 +199,21 @@ export default function MakeQueueScreen({ navigation }: Props) {
         eventName: trimmedEventName,
         maxGuests: normalizedMaxGuests,
       });
-      if (Platform.OS === 'web' && typeof window !== 'undefined' && created.hostAuthToken) {
+      if (created.hostAuthToken) {
         try {
-          window.sessionStorage.setItem(
-            `queueup-host-auth:${created.sessionId}`,
-            created.hostAuthToken
-          );
-        } catch {
-          // Ignore storage errors (e.g. private mode)
+          await storage.setHostAuth(created.sessionId, created.hostAuthToken);
+          // Store the full queue details right when it's created
+          await storage.setActiveQueue({
+            code: created.code,
+            sessionId: created.sessionId,
+            wsUrl: created.wsUrl,
+            hostAuthToken: created.hostAuthToken,
+            joinUrl: created.joinUrl,
+            eventName: created.eventName,
+            maxGuests: created.maxGuests
+          });
+        } catch (error) {
+          console.warn('Failed to store queue details:', error);
         }
       }
       navigation.navigate('HostQueueScreen', {
