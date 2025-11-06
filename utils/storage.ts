@@ -90,4 +90,18 @@ export const storage = {
     }
     return AsyncStorage.getItem(key);
   }
+  ,
+
+  async removeHostAuth(sessionId: string): Promise<void> {
+    const key = `${HOST_AUTH_PREFIX}${sessionId}`;
+    if (Platform.OS === 'web') {
+      try {
+        window.sessionStorage.removeItem(key);
+      } catch {
+        await AsyncStorage.removeItem(key);
+      }
+    } else {
+      await AsyncStorage.removeItem(key);
+    }
+  }
 };
