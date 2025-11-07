@@ -18,6 +18,7 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
 import { createQueue } from '../../lib/backend';
@@ -66,6 +67,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const [closeTime, setCloseTime] = useState(() => createTime(17));
   const [contact, setContact] = useState('');
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = React.useRef<any>(null);
+  const isWeb = Platform.OS === 'web';
 
   const applyTimeChange = useCallback(
     (field: TimeField, selected: Date) => {
@@ -194,10 +198,14 @@ export default function MakeQueueScreen({ navigation }: Props) {
     }
     const normalizedMaxGuests = Math.min(MAX_QUEUE_SIZE, Math.max(MIN_QUEUE_SIZE, maxSize));
     setLoading(true);
+
+    console.log('[QueueUp][create] Turnstile token:', turnstileToken ? 'present' : 'MISSING', turnstileToken?.substring(0, 20));
+
     try {
       const created = await createQueue({
         eventName: trimmedEventName,
         maxGuests: normalizedMaxGuests,
+        turnstileToken: turnstileToken ?? undefined,
       });
       if (created.hostAuthToken) {
         try {
@@ -216,6 +224,13 @@ export default function MakeQueueScreen({ navigation }: Props) {
           console.warn('Failed to store queue details:', error);
         }
       }
+
+      // Reset Turnstile for next use
+      setTurnstileToken(null);
+      if (turnstileRef.current?.reset) {
+        turnstileRef.current.reset();
+      }
+
       navigation.navigate('HostQueueScreen', {
         code: created.code,
         sessionId: created.sessionId,
@@ -227,7 +242,23 @@ export default function MakeQueueScreen({ navigation }: Props) {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error creating queue';
-      Alert.alert('Unable to create queue', message);
+
+      // Check if it's a Turnstile verification error
+      if (message.includes('Turnstile verification') || message.includes('verification required')) {
+        Alert.alert(
+          'Verification Required',
+          'Please complete the Cloudflare security check below before creating a queue.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Unable to create queue', message);
+      }
+
+      // Reset Turnstile on error
+      setTurnstileToken(null);
+      if (turnstileRef.current?.reset) {
+        turnstileRef.current.reset();
+      }
     } finally {
       setLoading(false);
     }
@@ -342,8 +373,51 @@ export default function MakeQueueScreen({ navigation }: Props) {
               textAlignVertical="top"
             />
 
+            {/* Turnstile Widget */}
+            {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+              <View style={{ marginVertical: 16, alignItems: 'center' }}>
+                <Turnstile
+                  ref={turnstileRef}
+                  siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+                  onSuccess={(token) => {
+                    console.log('[QueueUp][Turnstile] Token received:', token?.substring(0, 30));
+                    setTurnstileToken(token);
+                  }}
+                  onError={(error) => {
+                    console.error('[QueueUp][Turnstile] Error:', error);
+                    setTurnstileToken(null);
+                  }}
+                  onExpire={() => {
+                    console.warn('[QueueUp][Turnstile] Token expired');
+                    setTurnstileToken(null);
+                  }}
+                  onWidgetLoad={(widgetId) => {
+                    console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+                  }}
+                  options={{
+                    theme: 'auto',
+                    size: 'normal',
+                  }}
+                />
+              </View>
+            ) : null}
+
+            {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+                Complete the verification above to create queue
+              </Text>
+            ) : null}
+
             {/* Submit */}
-            <Pressable style={styles.button} onPress={onSubmit} disabled={loading}>
+            <Pressable
+              style={[
+                styles.button,
+                (loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken))
+                  ? styles.buttonDisabled
+                  : undefined
+              ]}
+              onPress={onSubmit}
+              disabled={loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}>
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (

@@ -15,6 +15,7 @@ import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
 import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
@@ -45,6 +46,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
@@ -53,6 +55,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
+  const turnstileRef = useRef<any>(null);
   const inQueue = Boolean(joinedCode && partyId);
   const isWeb = Platform.OS === 'web';
 
@@ -84,16 +87,26 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setJoinedCode(null);
     setPartyId(null);
     setConnectionState('idle');
+
+    // Debug: Log turnstile token status
+    console.log('[QueueUp][join] Turnstile token:', turnstileToken ? 'present' : 'MISSING', turnstileToken?.substring(0, 20));
+
     try {
       const joinResult = await joinQueue({
         code: trimmed,
         name,
         size: partySize,
+        turnstileToken: turnstileToken ?? undefined,
       });
       setResultText(`You're number ${joinResult.position} in line. We'll keep this updated.`);
       setJoinedCode(trimmed);
       setPartyId(joinResult.partyId);
       setSessionId(joinResult.sessionId ?? null);
+      // Reset Turnstile for next use
+      setTurnstileToken(null);
+      if (turnstileRef.current?.reset) {
+        turnstileRef.current.reset();
+      }
       // Debug: log identifiers for wrangler-side push testing
       if (typeof window !== 'undefined' && (window as any).console) {
         console.log('[QueueUp][join]', {
@@ -105,7 +118,23 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error joining queue';
-      Alert.alert('Unable to join queue', message);
+
+      // Check if it's a Turnstile verification error
+      if (message.includes('Turnstile verification') || message.includes('verification required')) {
+        Alert.alert(
+          'Verification Required',
+          'Please complete the Cloudflare security check above before joining the queue.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Unable to join queue', message);
+      }
+
+      // Reset Turnstile on error
+      setTurnstileToken(null);
+      if (turnstileRef.current?.reset) {
+        turnstileRef.current.reset();
+      }
     } finally {
       setLoading(false);
     }
@@ -533,6 +562,40 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
               onValueChange={(value) => setPartySize(Math.round(value))}
             />
 
+            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+              <View style={{ marginVertical: 16, alignItems: 'center' }}>
+                <Turnstile
+                  ref={turnstileRef}
+                  siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+                  onSuccess={(token) => {
+                    console.log('[QueueUp][Turnstile] Token received:', token?.substring(0, 30));
+                    setTurnstileToken(token);
+                  }}
+                  onError={(error) => {
+                    console.error('[QueueUp][Turnstile] Error:', error);
+                    setTurnstileToken(null);
+                  }}
+                  onExpire={() => {
+                    console.warn('[QueueUp][Turnstile] Token expired');
+                    setTurnstileToken(null);
+                  }}
+                  onWidgetLoad={(widgetId) => {
+                    console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+                  }}
+                  options={{
+                    theme: 'auto',
+                    size: 'normal',
+                  }}
+                />
+              </View>
+            ) : null}
+
+            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+                Complete the verification above to join
+              </Text>
+            ) : null}
+
             <View style={styles.actionsRow}>
               {inQueue ? (
                 <Pressable
@@ -550,9 +613,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
                 </Pressable>
               ) : (
                 <Pressable
-                  style={[styles.button, loading ? styles.buttonDisabled : undefined]}
+                  style={[
+                    styles.button,
+                    (loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken))
+                      ? styles.buttonDisabled
+                      : undefined
+                  ]}
                   onPress={onSubmit}
-                  disabled={loading || inQueue}>
+                  disabled={loading || inQueue || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}>
                   {loading ? (
                     <ActivityIndicator color="#fff" />
                   ) : (

@@ -331,6 +331,39 @@ async function handleCreate(
     return jsonError('maxGuests must be between 1 and 100', 400);
   }
 
+  // Turnstile verification
+  const turnstileToken = (payload as any).turnstileToken;
+  const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
+  const turnstileEnabled =
+    env.TURNSTILE_BYPASS !== 'true' &&
+    env.TURNSTILE_SECRET_KEY &&
+    env.TURNSTILE_SECRET_KEY.trim().length > 0;
+
+  console.log('[handleCreate] Turnstile check:', {
+    enabled: turnstileEnabled,
+    bypass: env.TURNSTILE_BYPASS,
+    hasSecret: !!env.TURNSTILE_SECRET_KEY,
+    hasToken: !!turnstileToken,
+    tokenPreview: turnstileToken?.substring(0, 20),
+  });
+
+  if (turnstileEnabled) {
+    if (!turnstileToken || typeof turnstileToken !== 'string' || turnstileToken.trim().length === 0) {
+      console.warn('[handleCreate] Turnstile token missing!');
+      return jsonError('Turnstile verification required', 400, {
+        errors: ['missing-input-response'],
+      });
+    }
+
+    const verification = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, remoteIp);
+    console.log('[handleCreate] Turnstile verification result:', verification);
+    if (!verification.success) {
+      return jsonError('Turnstile verification failed', 400, {
+        errors: verification['error-codes'] ?? [],
+      });
+    }
+  }
+
   const eventName = rawEventName;
   const id = env.QUEUE_DO.newUniqueId();
   const sessionId = id.toString();
@@ -454,15 +487,30 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   }
 
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
-  const shouldVerify =
+  const turnstileEnabled =
     env.TURNSTILE_BYPASS !== 'true' &&
     env.TURNSTILE_SECRET_KEY &&
-    env.TURNSTILE_SECRET_KEY.trim().length > 0 &&
-    typeof turnstileToken === 'string' &&
-    turnstileToken.length > 0;
+    env.TURNSTILE_SECRET_KEY.trim().length > 0;
 
-  if (shouldVerify) {
+  console.log('[handleJoin] Turnstile check:', {
+    enabled: turnstileEnabled,
+    bypass: env.TURNSTILE_BYPASS,
+    hasSecret: !!env.TURNSTILE_SECRET_KEY,
+    hasToken: !!turnstileToken,
+    tokenPreview: turnstileToken?.substring(0, 20),
+  });
+
+  // If Turnstile is enabled, require a valid token
+  if (turnstileEnabled) {
+    if (!turnstileToken || typeof turnstileToken !== 'string' || turnstileToken.trim().length === 0) {
+      console.warn('[handleJoin] Turnstile token missing!');
+      return jsonError('Turnstile verification required', 400, {
+        errors: ['missing-input-response'],
+      });
+    }
+
     const verification = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, remoteIp);
+    console.log('[handleJoin] Turnstile verification result:', verification);
     if (!verification.success) {
       return jsonError('Turnstile verification failed', 400, {
         errors: verification['error-codes'] ?? [],

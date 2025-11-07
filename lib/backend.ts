@@ -24,6 +24,7 @@ export interface CreateQueueResult {
 export interface CreateQueueParams {
   eventName: string;
   maxGuests: number;
+  turnstileToken?: string;
 }
 
 export const HOST_COOKIE_NAME = 'queue_host_auth';
@@ -59,7 +60,7 @@ function extractHostToken(setCookieHeader: string | null): string | undefined {
 const MIN_QUEUE_CAPACITY = 1;
 const MAX_QUEUE_CAPACITY = 100;
 
-export async function createQueue({ eventName, maxGuests }: CreateQueueParams): Promise<CreateQueueResult> {
+export async function createQueue({ eventName, maxGuests, turnstileToken }: CreateQueueParams): Promise<CreateQueueResult> {
   const trimmedEventName = eventName.trim();
   const normalizedMaxGuests = Number.isFinite(maxGuests)
     ? Math.min(MAX_QUEUE_CAPACITY, Math.max(MIN_QUEUE_CAPACITY, Math.round(maxGuests)))
@@ -67,6 +68,7 @@ export async function createQueue({ eventName, maxGuests }: CreateQueueParams): 
   const body = {
     eventName: trimmedEventName,
     maxGuests: normalizedMaxGuests,
+    turnstileToken: turnstileToken || undefined,
   };
   const response = await fetch(`${API_BASE_URL}/api/queue/create`, {
     method: 'POST',
@@ -88,6 +90,7 @@ export interface JoinQueueParams {
   code: string;
   name?: string;
   size?: number;
+  turnstileToken?: string;
 }
 
 export interface JoinQueueResult {
@@ -96,10 +99,11 @@ export interface JoinQueueResult {
   sessionId?: string;
 }
 
-export async function joinQueue({ code, name, size }: JoinQueueParams): Promise<JoinQueueResult> {
+export async function joinQueue({ code, name, size, turnstileToken }: JoinQueueParams): Promise<JoinQueueResult> {
   const payload = {
     name: name?.trim() || undefined,
     size: size && Number.isFinite(size) ? size : undefined,
+    turnstileToken: turnstileToken || undefined,
   };
 
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/join`, {

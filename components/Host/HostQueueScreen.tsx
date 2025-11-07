@@ -27,7 +27,7 @@ import {
   HostParty,
   buildHostConnectUrl,
 } from '../../lib/backend';
-import { Copy } from 'lucide-react-native';
+import { Copy, Check } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
@@ -83,6 +83,7 @@ export default function HostQueueScreen({ route }: Props) {
   const [actionLoading, setActionLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
   const [closeConfirmVisibleWeb, setCloseConfirmVisibleWeb] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const isWeb = Platform.OS === 'web';
   const [savingQr, setSavingQr] = useState(false);
 
@@ -279,6 +280,13 @@ export default function HostQueueScreen({ route }: Props) {
   const handleCopyCode = useCallback(async () => {
     try {
       await Clipboard.setStringAsync(code);
+      setCodeCopied(true);
+      
+      // Reset the icon back to copy after 3 seconds
+      setTimeout(() => {
+        setCodeCopied(false);
+      }, 3000);
+      
       if (Platform.OS === 'android') {
         ToastAndroid.show('Queue code copied', ToastAndroid.SHORT);
       } else {
@@ -627,7 +635,7 @@ export default function HostQueueScreen({ route }: Props) {
             onPress={handleCopyCode}
             accessibilityRole="button"
             accessibilityLabel="Copy queue code to clipboard">
-            <Copy color="#222" size={14} />
+            {codeCopied ? <Check color="#222" size={14} /> : <Copy color="#222" size={14} />}
           </Pressable>
         </View>
         {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
