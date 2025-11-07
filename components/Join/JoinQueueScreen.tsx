@@ -15,9 +15,10 @@ import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
-import { buildGuestConnectUrl, joinQueue, leaveQueue } from '../../lib/backend';
+import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -40,15 +41,21 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   );
   const [joinedCode, setJoinedCode] = useState<string | null>(null);
   const [partyId, setPartyId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [pushReady, setPushReady] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
+  const autoPushAttemptRef = useRef<string | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
+  const turnstileRef = useRef<any>(null);
   const inQueue = Boolean(joinedCode && partyId);
   const isWeb = Platform.OS === 'web';
 
@@ -80,18 +87,61 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setJoinedCode(null);
     setPartyId(null);
     setConnectionState('idle');
+
+    // Debug: Log turnstile token status (do not log token value)
+    console.log('[QueueUp][join] Turnstile token:', turnstileToken ? 'present' : 'MISSING');
+
     try {
       const joinResult = await joinQueue({
         code: trimmed,
         name,
         size: partySize,
+        turnstileToken: turnstileToken ?? undefined,
       });
-      setResultText(`You're number ${joinResult.position} in line. We'll keep this updated.`);
-      setJoinedCode(trimmed);
-      setPartyId(joinResult.partyId);
+      setTurnstileToken(null);
+      if (turnstileRef.current?.reset) {
+        turnstileRef.current.reset();
+      }
+      const guestName = name.trim();
+      if (typeof window !== 'undefined' && (window as any).console) {
+        console.log('[QueueUp][join]', {
+          ts: new Date().toISOString(),
+          sessionId: joinResult.sessionId ?? null,
+          partyId: joinResult.partyId,
+          code: trimmed,
+        });
+      }
+      navigation.replace('GuestQueueScreen', {
+        code: trimmed,
+        partyId: joinResult.partyId,
+        sessionId: joinResult.sessionId ?? null,
+        initialPosition: joinResult.position,
+        initialAheadCount: Math.max(joinResult.position - 1, 0),
+        initialQueueLength: joinResult.queueLength ?? null,
+        initialEtaMs: joinResult.estimatedWaitMs ?? null,
+        guestName: guestName || undefined,
+        partySize,
+      });
+      return;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error joining queue';
-      Alert.alert('Unable to join queue', message);
+
+      // Check if it's a Turnstile verification error
+      if (message.includes('Turnstile verification') || message.includes('verification required')) {
+        Alert.alert(
+          'Verification Required',
+          'Please complete the Cloudflare security check above before joining the queue.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Unable to join queue', message);
+      }
+
+      // Reset Turnstile on error
+      setTurnstileToken(null);
+      if (turnstileRef.current?.reset) {
+        turnstileRef.current.reset();
+      }
     } finally {
       setLoading(false);
     }
@@ -169,6 +219,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       reconnectAttempt.current = 0;
       setJoinedCode(null);
       setPartyId(null);
+      setSessionId(null);
+      setPushReady(false);
+      setPushMessage(null);
+      autoPushAttemptRef.current = null;
       setConnectionState('idle');
       if (message !== undefined) {
         setResultText(message);
@@ -268,12 +322,120 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     };
   }, [joinedCode, partyId, clearReconnect, closeActiveSocket, resetSession]);
 
+  const enablePush = useCallback(
+    async (options?: { sessionOverride?: string | null; partyOverride?: string | null; silent?: boolean }) => {
+      if (Platform.OS !== 'web') {
+        return;
+      }
+      const targetSession = options?.sessionOverride ?? sessionId;
+      const targetParty = options?.partyOverride ?? partyId;
+      if (!targetSession || !targetParty) {
+        return;
+      }
+      if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+        return;
+      }
+      const hasServiceWorker = 'serviceWorker' in navigator;
+      const hasPushManager = 'PushManager' in window;
+      const hasNotificationApi = typeof Notification !== 'undefined';
+      if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
+        setPushMessage('Notifications not supported in this browser.');
+        if (!options?.silent) {
+          Alert.alert('Push not supported', 'This browser does not support web push notifications.');
+        }
+        return;
+      }
+      try {
+        setPushMessage('Enabling notifications…');
+        const publicKey = await getVapidPublicKey();
+        if (!publicKey) {
+          throw new Error('Missing VAPID key');
+        }
+        const b64ToU8 = (b64: string) => {
+          try {
+            return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+          } catch (error) {
+            throw new Error('Invalid VAPID public key format');
+          }
+        };
+        const isGhPages = window.location.pathname.startsWith('/queueup');
+        const swPath = isGhPages ? '/queueup/sw.js' : '/sw.js';
+        const swScope = isGhPages ? '/queueup/' : '/';
+        const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
+        let subscription = await registration.pushManager.getSubscription();
+        const requestPermission = async () => {
+          if (Notification.permission === 'granted') {
+            return 'granted' as NotificationPermission;
+          }
+          if (Notification.permission === 'denied') {
+            return 'denied' as NotificationPermission;
+          }
+          return Notification.requestPermission();
+        };
+        if (!subscription) {
+          const perm = await requestPermission();
+          if (perm !== 'granted') {
+            setPushMessage('Notifications are blocked in your browser settings.');
+            if (!options?.silent) {
+              Alert.alert(
+                'Notifications blocked',
+                'Enable notifications in your browser settings to receive alerts.'
+              );
+            }
+            return;
+          }
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: b64ToU8(publicKey),
+          });
+        }
+        await savePushSubscription({
+          sessionId: targetSession,
+          partyId: targetParty,
+          subscription: subscription.toJSON?.() ?? (subscription as any),
+        });
+        console.log('[QueueUp][push] saved subscription', {
+          endpoint: subscription.endpoint,
+          apiBase: API_BASE_URL,
+          sessionId: targetSession,
+          partyId: targetParty,
+        });
+        setPushReady(true);
+        setPushMessage('Notifications on');
+        if (!options?.silent) {
+          Alert.alert('Notifications enabled', 'We will alert you when it is your turn.');
+        }
+      } catch (e) {
+        console.warn('enablePush failed', e);
+        setPushMessage('Unable to enable notifications right now.');
+        if (!options?.silent) {
+          Alert.alert('Failed to enable push', 'Please try again in a moment.');
+        }
+      }
+    },
+    [partyId, sessionId]
+  );
+
   useEffect(() => {
     return () => {
       clearReconnect();
       closeActiveSocket();
     };
   }, [clearReconnect, closeActiveSocket]);
+
+  useEffect(() => {
+    if (!isWeb || !sessionId || !partyId || pushReady) {
+      return;
+    }
+    const key = `${sessionId}:${partyId}`;
+    if (autoPushAttemptRef.current === key) {
+      return;
+    }
+    autoPushAttemptRef.current = key;
+    enablePush({ sessionOverride: sessionId, partyOverride: partyId, silent: true }).catch(() => {
+      // Errors are surfaced through pushMessage state; no-op here to avoid unhandled rejections.
+    });
+  }, [isWeb, sessionId, partyId, pushReady, enablePush]);
 
   const connectionLabel = useMemo(() => {
     switch (connectionState) {
@@ -412,6 +574,40 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
               onValueChange={(value) => setPartySize(Math.round(value))}
             />
 
+            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+              <View style={{ marginVertical: 16, alignItems: 'center' }}>
+                <Turnstile
+                  ref={turnstileRef}
+                  siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+                  onSuccess={(token) => {
+                    console.log('[QueueUp][Turnstile] Token received');
+                    setTurnstileToken(token);
+                  }}
+                  onError={(error) => {
+                    console.error('[QueueUp][Turnstile] Error:', error);
+                    setTurnstileToken(null);
+                  }}
+                  onExpire={() => {
+                    console.warn('[QueueUp][Turnstile] Token expired');
+                    setTurnstileToken(null);
+                  }}
+                  onWidgetLoad={(widgetId) => {
+                    console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+                  }}
+                  options={{
+                    theme: 'auto',
+                    size: 'normal',
+                  }}
+                />
+              </View>
+            ) : null}
+
+            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+                Complete the verification above to join
+              </Text>
+            ) : null}
+
             <View style={styles.actionsRow}>
               {inQueue ? (
                 <Pressable
@@ -429,9 +625,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
                 </Pressable>
               ) : (
                 <Pressable
-                  style={[styles.button, loading ? styles.buttonDisabled : undefined]}
+                  style={[
+                    styles.button,
+                    (loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken))
+                      ? styles.buttonDisabled
+                      : undefined
+                  ]}
                   onPress={onSubmit}
-                  disabled={loading || inQueue}>
+                  disabled={loading || inQueue || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}>
                   {loading ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
@@ -446,6 +647,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             <View style={styles.resultCard}>
               <Text style={styles.resultText}>{resultText}</Text>
               {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
+              {isWeb && inQueue && pushMessage ? (
+                <Text style={styles.resultHint}>{pushMessage}</Text>
+              ) : null}
             </View>
           ) : null}
         </ScrollView>
