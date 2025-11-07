@@ -27,7 +27,7 @@ import {
   HostParty,
   buildHostConnectUrl,
 } from '../../lib/backend';
-import { Copy, Check } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
 
@@ -667,7 +667,11 @@ export default function HostQueueScreen({ route }: Props) {
             onPress={handleCopyCode}
             accessibilityRole="button"
             accessibilityLabel="Copy queue code to clipboard">
-            {codeCopied ? <Check color="#222" size={14} /> : <Copy color="#222" size={14} />}
+            {codeCopied ? (
+              <Feather name="check" color="#222" size={14} />
+            ) : (
+              <Feather name="copy" color="#222" size={14} />
+            )}
           </Pressable>
         </View>
         {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
