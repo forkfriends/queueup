@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
     borderColor: '#ef6868',
     padding: 6,
     borderRadius: 8,
-    width: 'fit-content',
+    alignSelf: 'flex-start',
     borderWidth: 1,
   },
   compactContainer: {
