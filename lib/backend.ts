@@ -191,7 +191,9 @@ export interface PushSubscriptionParams {
     p256dh?: string;
     auth?: string;
   };
-  [key: string]: any; // Allow extra fields for flexibility
+  expirationTime?: number | null;
+  options?: unknown;
+  [key: string]: unknown; // Allow extra fields for flexibility
 }
 
 export async function savePushSubscription(params: {
