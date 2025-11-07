@@ -347,14 +347,14 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             partyId,
             });
             setPushReady(true);
-            setPushMessage('Notifications on');
+            setPushMessage('');
             if (!options?.silent) {
             Alert.alert('Notifications enabled', 'We will alert you when it is your turn.');
             }
         } catch (e) {
             console.warn('enablePush failed', e);
             setPushMessage('Unable to enable notifications right now.');
-            if (!options?.silent) {
+            if (!optionxs?.silent) {
             Alert.alert('Failed to enable push', 'Please try again in a moment.');
             }
         }
@@ -492,7 +492,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             <Text style={styles.statusText}>{statusText}</Text>
             {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
             <Text style={styles.connectionText}>{connectionLabel}</Text>
-          {called ? <Text style={styles.calledText}>It’s your turn!</Text> : null}
+          {called ? <Text style={styles.calledText}>It's your turn!</Text> : null}
           {called ? (
             <View style={styles.timerRow}>
               <Timer targetTimestamp={callDeadline} label="Time left" compact />

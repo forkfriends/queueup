@@ -403,12 +403,6 @@ export default function MakeQueueScreen({ navigation }: Props) {
               </View>
             ) : null}
 
-            {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
-              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
-                Complete the verification above to create queue
-              </Text>
-            ) : null}
-
             {/* Submit */}
             <Pressable
               style={[

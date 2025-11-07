@@ -30,7 +30,7 @@ export default StyleSheet.create({
         alignSelf: 'flex-start',
         paddingHorizontal: 12,
         paddingVertical: 6,
-        borderRadius: 999,
+        borderRadius: 16,
         backgroundColor: '#F1F3F7',
         marginBottom: 12,
     },
@@ -61,15 +61,15 @@ export default StyleSheet.create({
         fontSize: 13,
         color: '#586069',
     },
-  calledText: {
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0a7d34',
-  },
-  timerRow: {
-    marginTop: 6,
-  },
+    calledText: {
+        marginTop: 10,
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#0a7d34',
+    },
+    timerRow: {
+        marginTop: 6,
+    },
     pushButton: {
         marginTop: 16,
         alignSelf: 'flex-start',

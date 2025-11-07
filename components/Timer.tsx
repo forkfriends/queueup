@@ -55,7 +55,6 @@ export default function Timer({ targetTimestamp, label, onExpire, compact }: Tim
 
   return (
     <View style={[styles.container, compact ? styles.compactContainer : undefined]}>
-      {/* {label ? <Text style={styles.label}>{label}</Text> : null} */}
       <Text style={[styles.timeText, compact ? styles.compactText : undefined]}>{display}</Text>
     </View>
   );
@@ -76,17 +75,12 @@ const styles = StyleSheet.create({
   compactContainer: {
     gap: 4,
   },
-  label: {
-    fontSize: 14,
-    color: '#555',
-    fontWeight: '600',
-  },
   timeText: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '300',
     color: '#111',
   },
   compactText: {
-    fontSize: 18,
+    fontSize: 12,
   },
 });
