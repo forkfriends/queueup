@@ -10,7 +10,7 @@
     "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix && prettier \"**/*.{js,jsx,ts,tsx,json}\" --write",
     "preweb": "mkdir -p public && cp docs/sw.js public/sw.js",
     "web": "expo start --web",
-    "build:web": "mkdir -p public && cp docs/sw.js public/sw.js && expo export --platform web --output-dir docs",
+    "build:web": "mkdir -p public && cp docs/sw.js public/sw.js && cp assets/ff_logo.png public/icon-192.png && cp assets/ff_logo.png public/icon-512.png && expo export --platform web --output-dir docs && cp public/manifest.json docs/manifest.json && cp public/icon-192.png docs/icon-192.png && cp public/icon-512.png docs/icon-512.png",
     "deploy:apply": "wrangler d1 migrations apply DB",
     "deploy:push": "wrangler deploy --config api/wrangler.toml",
     "test": "vitest run --config api/vitest.config.ts",
