@@ -843,7 +843,7 @@ function applyCors(
   if (isPreflight) {
     headers.set(
       'Access-Control-Allow-Headers',
-      'content-type, cf-connecting-ip, authorization, x-host-auth'
+      'content-type, cf-connecting-ip, authorization, x-host-auth, if-none-match'
     );
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set('Access-Control-Max-Age', '600');

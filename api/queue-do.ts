@@ -382,7 +382,15 @@ export class QueueDO implements DurableObject {
   }
 
   private async handleSnapshot(request: Request): Promise<Response> {
-    // Read snapshot from KV instead of DO state (much cheaper)
+    const url = new URL(request.url);
+    const partyId = url.searchParams.get('partyId');
+
+    // Guest snapshot (partyId provided)
+    if (partyId) {
+      return this.handleGuestSnapshot(request, partyId);
+    }
+
+    // Host snapshot (read from KV)
     const key = `queue:${this.sessionId}:snapshot`;
     const snapshot = await this.env.QUEUE_KV.get(key);
 
@@ -421,6 +429,56 @@ export class QueueDO implements DurableObject {
     }
 
     return new Response(snapshot, {
+      headers: {
+        'content-type': 'application/json',
+        etag,
+        'cache-control': 'no-cache, no-store, must-revalidate',
+      },
+    });
+  }
+
+  private async handleGuestSnapshot(request: Request, partyId: string): Promise<Response> {
+    // Load current state from storage (needed for guest position calculation)
+    await this.restoreState();
+
+    // Build guest-specific snapshot (same logic as sendGuestInitialState)
+    let guestSnapshot: string;
+    
+    if (this.closed) {
+      guestSnapshot = JSON.stringify({ type: 'closed' });
+    } else if (this.nowServing && this.nowServing.id === partyId) {
+      guestSnapshot = JSON.stringify({
+        type: 'called',
+        deadline: this.callDeadline ?? null,
+      });
+    } else if (!this.findParty(partyId)) {
+      guestSnapshot = JSON.stringify({
+        type: 'removed',
+        reason: 'served',
+      });
+    } else {
+      const payload = this.buildGuestPositionPayload(partyId);
+      guestSnapshot = JSON.stringify({
+        type: 'position',
+        ...payload,
+      });
+    }
+
+    // Compute ETag from guest snapshot content
+    const encoder = new TextEncoder();
+    const data = encoder.encode(guestSnapshot);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    const etag = `"${hashHex.substring(0, 16)}"`;
+
+    // Check if client has current version
+    const clientEtag = request.headers.get('if-none-match');
+    if (clientEtag === etag) {
+      return new Response(null, { status: 304 });
+    }
+
+    return new Response(guestSnapshot, {
       headers: {
         'content-type': 'application/json',
         etag,
