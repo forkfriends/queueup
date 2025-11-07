@@ -1,12 +1,21 @@
 {
   "expo": {
-    "name": "my-expo-app",
-    "slug": "my-expo-app",
+    "name": "QueueUp",
+    "slug": "queueup",
     "version": "1.0.0",
     "web": {
       "favicon": "./assets/favicon.png",
       "output": "single",
-      "bundler": "metro"
+      "bundler": "metro",
+      "name": "QueueUp",
+      "shortName": "QueueUp",
+      "description": "Queue management made simple",
+      "themeColor": "#222222",
+      "backgroundColor": "#ffffff",
+      "display": "standalone",
+      "orientation": "portrait",
+      "scope": "/queueup/",
+      "startUrl": "/queueup/"
     },
     "experiments": {
       "tsconfigPaths": true,
@@ -26,14 +35,14 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.my-expo-app"
+      "bundleIdentifier": "com.queueup.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.anonymous.myexpoapp"
+      "package": "com.queueup.app"
     }
   }
 }

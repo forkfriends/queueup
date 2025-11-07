@@ -45,8 +45,19 @@ npm run test
 
 Use `npm run test:watch` for faster feedback while iterating.
 
+## Security: Cloudflare Turnstile
+
+QueueUp includes optional bot protection via Cloudflare Turnstile on the Join Queue screen (web only). To enable:
+
+1. Get your free Turnstile keys from the [Cloudflare Dashboard](https://dash.cloudflare.com/turnstile)
+2. Set `EXPO_PUBLIC_TURNSTILE_SITE_KEY` in your `.env` file
+3. Configure the secret key in Cloudflare Workers: `wrangler secret put TURNSTILE_SECRET_KEY`
+
+See the complete setup guide: [docs/TURNSTILE-SETUP.md](docs/TURNSTILE-SETUP.md)
+
 ## Learn More
 - Architecture deep dive: `docs/ARCHITECTURE.md`
 - API contract: `docs/API.md`
+- Turnstile setup: `docs/TURNSTILE-SETUP.md`
 - Deploying the web front end: `.github/workflows/deploy-gh-pages.yml`
 >>>>>>> main
