@@ -88,8 +88,8 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setPartyId(null);
     setConnectionState('idle');
 
-    // Debug: Log turnstile token status
-    console.log('[QueueUp][join] Turnstile token:', turnstileToken ? 'present' : 'MISSING', turnstileToken?.substring(0, 20));
+    // Debug: Log turnstile token status (do not log token value)
+    console.log('[QueueUp][join] Turnstile token:', turnstileToken ? 'present' : 'MISSING');
 
     try {
       const joinResult = await joinQueue({
@@ -344,8 +344,13 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         if (!publicKey) {
           throw new Error('Missing VAPID key');
         }
-        const b64ToU8 = (b64: string) =>
-          Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+        const b64ToU8 = (b64: string) => {
+          try {
+            return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+          } catch (error) {
+            throw new Error('Invalid VAPID public key format');
+          }
+        };
         const isGhPages = window.location.pathname.startsWith('/queueup');
         const swPath = isGhPages ? '/queueup/sw.js' : '/sw.js';
         const swScope = isGhPages ? '/queueup/' : '/';
@@ -568,7 +573,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
                   ref={turnstileRef}
                   siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
                   onSuccess={(token) => {
-                    console.log('[QueueUp][Turnstile] Token received:', token?.substring(0, 30));
+                    console.log('[QueueUp][Turnstile] Token received');
                     setTurnstileToken(token);
                   }}
                   onError={(error) => {

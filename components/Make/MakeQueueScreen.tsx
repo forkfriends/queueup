@@ -199,7 +199,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
     const normalizedMaxGuests = Math.min(MAX_QUEUE_SIZE, Math.max(MIN_QUEUE_SIZE, maxSize));
     setLoading(true);
 
-    console.log('[QueueUp][create] Turnstile token:', turnstileToken ? 'present' : 'MISSING', turnstileToken?.substring(0, 20));
+    console.log('[QueueUp][create] Turnstile token:', turnstileToken ? 'present' : 'MISSING');
 
     try {
       const created = await createQueue({
@@ -380,7 +380,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
                   ref={turnstileRef}
                   siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
                   onSuccess={(token) => {
-                    console.log('[QueueUp][Turnstile] Token received:', token?.substring(0, 30));
+                    console.log('[QueueUp][Turnstile] Token received');
                     setTurnstileToken(token);
                   }}
                   onError={(error) => {

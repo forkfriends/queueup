@@ -277,13 +277,20 @@ export default function HostQueueScreen({ route }: Props) {
     advance();
   }, [advance]);
 
+  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleCopyCode = useCallback(async () => {
     try {
       await Clipboard.setStringAsync(code);
       setCodeCopied(true);
       
+      // Clear any existing timeout
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      
       // Reset the icon back to copy after 3 seconds
-      setTimeout(() => {
+      copyTimeoutRef.current = setTimeout(() => {
         setCodeCopied(false);
       }, 3000);
       
@@ -297,6 +304,15 @@ export default function HostQueueScreen({ route }: Props) {
       Alert.alert('Copy failed', 'Unable to copy the queue code. Try again.');
     }
   }, [code]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleShareQr = useCallback(async () => {
     if (!shareableLink) {
@@ -635,7 +651,7 @@ export default function HostQueueScreen({ route }: Props) {
             onPress={handleCopyCode}
             accessibilityRole="button"
             accessibilityLabel="Copy queue code to clipboard">
-            {codeCopied ? <Check color="#222" size={14} /> : <Copy color="#222" size={14} />}
+            {codeCopied ? <Check style={styles.headerCopyText} size={14} /> : <Copy style={styles.headerCopyText} size={14} />}
           </Pressable>
         </View>
         {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
