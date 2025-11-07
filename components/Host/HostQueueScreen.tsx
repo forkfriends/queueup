@@ -769,11 +769,11 @@ export default function HostQueueScreen({ route }: Props) {
               }`
             : 'No party currently called.'}
         </Text>
-        {nowServing &&
+        {nowServing ? (
           <View style={styles.timerRow}>
             <Timer targetTimestamp={callDeadline ?? null} label="Time left" compact />
           </View>
-        }
+        ) : null}
       </View>
 
       <View style={styles.queueCard}>
