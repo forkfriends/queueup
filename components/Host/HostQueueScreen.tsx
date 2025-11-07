@@ -651,7 +651,7 @@ export default function HostQueueScreen({ route }: Props) {
             onPress={handleCopyCode}
             accessibilityRole="button"
             accessibilityLabel="Copy queue code to clipboard">
-            {codeCopied ? <Check color={styles.headerCopyText.color} size={14} /> : <Copy color={styles.headerCopyText.color} size={14} />}
+            {codeCopied ? <Check color="#222" size={14} /> : <Copy color="#222" size={14} />}
           </Pressable>
         </View>
         {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
