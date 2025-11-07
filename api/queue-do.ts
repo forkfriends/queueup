@@ -1,5 +1,6 @@
 import type { Env } from './worker';
 import { HOST_COOKIE_NAME, verifyHostCookie } from './utils/auth';
+import { buildPushPayload } from '@block65/webcrypto-web-push';
 
 type QueueStatus = 'waiting' | 'called';
 type PartyRemovalReason = 'served' | 'left' | 'kicked' | 'no_show' | 'closed';
@@ -149,12 +150,13 @@ export class QueueDO implements DurableObject {
     await this.persistState();
     this.broadcastHostSnapshot();
     this.broadcastGuestPositions();
+    await this.triggerPositionPushes();
 
     const aheadWaiting = this.queue.length - 1;
     const aheadCount = aheadWaiting + (this.nowServing ? 1 : 0);
     const position = aheadCount + 1;
 
-    return this.jsonResponse({ partyId: party.id, position });
+    return this.jsonResponse({ partyId: party.id, position, sessionId: this.sessionId });
   }
 
   private async handleDeclareNearby(request: Request): Promise<Response> {
@@ -253,6 +255,7 @@ export class QueueDO implements DurableObject {
       return result;
     }
 
+    await this.triggerPositionPushes();
     return this.jsonResponse(result);
   }
 
@@ -475,6 +478,7 @@ export class QueueDO implements DurableObject {
       await this.persistState();
 
       this.notifyGuestCalled(selectedParty.id);
+      this.sendPushSafe(selectedParty.id, 'called').catch((e) => console.warn('push called error', e));
     } else {
       this.nowServing = null;
       this.pendingPartyId = null;
@@ -531,6 +535,7 @@ export class QueueDO implements DurableObject {
     this.broadcastGuestPositions();
     this.notifyGuestRemoval(partyId, reason);
 
+    await this.triggerPositionPushes();
     return true;
   }
 
@@ -588,6 +593,98 @@ export class QueueDO implements DurableObject {
     const message = JSON.stringify({ type: 'called' });
     for (const socket of sockets) {
       this.safeSend(socket, message);
+    }
+  }
+
+  private async triggerPositionPushes(): Promise<void> {
+    if (!this.nowServing) return;
+    // Queue indices for position-based notifications when nowServing exists:
+    // - index 0 = position 2 (first in queue after the currently served guest)
+    // - index 3 = position 5 (fourth in queue after the currently served guest)
+    const candidates: Array<[number, 'pos_2' | 'pos_5']> = [
+      [0, 'pos_2'],  // position 2
+      [3, 'pos_5'],  // position 5
+    ];
+    for (const [idx, kind] of candidates) {
+      const party = this.queue[idx];
+      if (!party) continue;
+      await this.sendPushSafe(party.id, kind);
+    }
+  }
+
+  private async sendPushSafe(partyId: string, kind: 'called' | 'pos_2' | 'pos_5'): Promise<void> {
+    try {
+      // VAPID keys are required for push notifications
+      if (!this.env.VAPID_PUBLIC || !this.env.VAPID_PRIVATE) {
+        console.error('Missing VAPID_PUBLIC or VAPID_PRIVATE environment variable. Skipping push notification.');
+        return;
+      }
+
+      const exists = await this.env.DB.prepare(
+        "SELECT 1 AS x FROM events WHERE session_id=?1 AND party_id=?2 AND type='push_sent' AND json_extract(details, '$.kind') = ?3 LIMIT 1"
+      )
+        .bind(this.sessionId, partyId, kind)
+        .first<{ x: number }>();
+      if (exists?.x) return;
+
+      const sub = await this.env.DB.prepare(
+        'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE session_id=?1 AND party_id=?2 ORDER BY created_at DESC LIMIT 1'
+      )
+        .bind(this.sessionId, partyId)
+        .first<{ endpoint: string; p256dh: string; auth: string }>();
+      if (!sub) return;
+
+      const title =
+        kind === 'called'
+          ? "It's your turn"
+          : kind === 'pos_2'
+            ? "You're #2—almost up"
+            : "You're #5—start heading back";
+      const body =
+        kind === 'called'
+          ? 'Please check in at the host within 2 minutes to keep your spot.'
+          : kind === 'pos_2'
+            ? 'Almost your turn. Please make your way back.'
+            : 'You may want to start returning.';
+
+      const payload = await buildPushPayload(
+        { data: JSON.stringify({ title, body }), options: { ttl: 60 } },
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth }, expirationTime: null },
+        {
+          subject: this.env.VAPID_SUBJECT ?? 'mailto:team@queue-up.app',
+          publicKey: this.env.VAPID_PUBLIC,
+          privateKey: this.env.VAPID_PRIVATE,
+        }
+      );
+      const resp = await fetch(sub.endpoint, {
+        method: payload.method,
+        headers: payload.headers as any,
+        body: payload.body as any,
+      });
+      if (!resp.ok && (resp.status === 404 || resp.status === 410)) {
+        try {
+          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2')
+            .bind(this.sessionId, partyId)
+            .run();
+        } catch {}
+        return;
+      }
+
+      await this.env.DB.prepare(
+        "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'push_sent', ?3)"
+      )
+        .bind(this.sessionId, partyId, JSON.stringify({ kind }))
+        .run();
+    } catch (e: any) {
+      const status = e?.status ?? e?.code ?? 0;
+      if (status === 404 || status === 410) {
+        try {
+          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2')
+            .bind(this.sessionId, partyId)
+            .run();
+        } catch {}
+      }
+      // swallow to avoid breaking queue ops
     }
   }
 
