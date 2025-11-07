@@ -23,9 +23,9 @@ export const storage = {
     
     if (Platform.OS === 'web') {
       try {
-        window.sessionStorage.setItem(ACTIVE_QUEUES_KEY, value);
+        window.localStorage.setItem(ACTIVE_QUEUES_KEY, value);
       } catch {
-        // Fallback to AsyncStorage on web if sessionStorage fails
+        // Fallback to AsyncStorage on web if localStorage fails
         await AsyncStorage.setItem(ACTIVE_QUEUES_KEY, value);
       }
     } else {
@@ -38,9 +38,9 @@ export const storage = {
     
     if (Platform.OS === 'web') {
       try {
-        value = window.sessionStorage.getItem(ACTIVE_QUEUES_KEY);
+        value = window.localStorage.getItem(ACTIVE_QUEUES_KEY);
       } catch {
-        // Fallback to AsyncStorage on web if sessionStorage fails
+        // Fallback to AsyncStorage on web if localStorage fails
         value = await AsyncStorage.getItem(ACTIVE_QUEUES_KEY);
       }
     } else {
@@ -57,7 +57,7 @@ export const storage = {
 
     if (Platform.OS === 'web') {
       try {
-        window.sessionStorage.setItem(ACTIVE_QUEUES_KEY, value);
+        window.localStorage.setItem(ACTIVE_QUEUES_KEY, value);
       } catch {
         await AsyncStorage.setItem(ACTIVE_QUEUES_KEY, value);
       }
@@ -70,7 +70,7 @@ export const storage = {
     const key = `${HOST_AUTH_PREFIX}${sessionId}`;
     if (Platform.OS === 'web') {
       try {
-        window.sessionStorage.setItem(key, token);
+        window.localStorage.setItem(key, token);
       } catch {
         await AsyncStorage.setItem(key, token);
       }
@@ -83,7 +83,7 @@ export const storage = {
     const key = `${HOST_AUTH_PREFIX}${sessionId}`;
     if (Platform.OS === 'web') {
       try {
-        return window.sessionStorage.getItem(key);
+        return window.localStorage.getItem(key);
       } catch {
         return AsyncStorage.getItem(key);
       }
@@ -96,7 +96,7 @@ export const storage = {
     const key = `${HOST_AUTH_PREFIX}${sessionId}`;
     if (Platform.OS === 'web') {
       try {
-        window.sessionStorage.removeItem(key);
+        window.localStorage.removeItem(key);
       } catch {
         await AsyncStorage.removeItem(key);
       }
