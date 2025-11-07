@@ -6,6 +6,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 24,
+    flexGrow: 1,
   },
   title: {
     fontSize: 28,

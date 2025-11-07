@@ -17,7 +17,7 @@ export default defineWorkersConfig({
           configPath: wranglerConfigPath,
         },
         miniflare: {
-          compatibilityDate: '2025-10-08',
+          compatibilityDate: '2024-11-01',
           bindings: {
             TURNSTILE_SECRET_KEY: 'test-secret',
             HOST_AUTH_SECRET: 'test-host-secret',

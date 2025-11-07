@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Image, Pressable, Platform } from 'react-native';
+import { storage } from '../../utils/storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
@@ -9,6 +10,43 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 
 export default function HomeScreen({ navigation }: Props) {
   const handledPrefillRef = useRef(false);
+  const [activeQueues, setActiveQueues] = React.useState<Array<{
+    code: string;
+    sessionId: string;
+    wsUrl: string;
+    hostAuthToken: string;
+    joinUrl?: string;
+    eventName?: string;
+    maxGuests?: number;
+    createdAt: number;
+  }>>([]);
+
+  // Check for active queue on mount and when returning to screen
+  const checkForActiveQueues = React.useCallback(async () => {
+    try {
+      const storedQueues = await storage.getActiveQueues();
+      console.log('Checking for stored queues:', storedQueues.length ? `Found ${storedQueues.length}` : 'None found');
+      // Sort queues by creation time, newest first
+      setActiveQueues(storedQueues.sort((a, b) => b.createdAt - a.createdAt));
+    } catch (error) {
+      console.error('Error checking for active queues:', error);
+      setActiveQueues([]);
+    }
+  }, []);
+
+  // Check on mount
+  React.useEffect(() => {
+    void checkForActiveQueues();
+  }, [checkForActiveQueues]);
+
+  // Check when screen comes into focus
+  React.useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      void checkForActiveQueues();
+    });
+
+    return unsubscribe;
+  }, [navigation, checkForActiveQueues]);
 
   useEffect(() => {
     if (handledPrefillRef.current) {
@@ -56,6 +94,31 @@ export default function HomeScreen({ navigation }: Props) {
             <Text style={styles.buttonText}>Join Queue</Text>
           </Pressable>
         </View>
+
+        {activeQueues.map((queue, index) => (
+          <Pressable
+            key={queue.code}
+            style={[
+              styles.button,
+              styles.returnButton,
+              index > 0 && styles.returnButtonSpacing
+            ]}
+            onPress={() => {
+              navigation.navigate('HostQueueScreen', {
+                code: queue.code,
+                sessionId: queue.sessionId,
+                wsUrl: queue.wsUrl,
+                hostAuthToken: queue.hostAuthToken,
+                joinUrl: queue.joinUrl,
+                eventName: queue.eventName,
+                maxGuests: queue.maxGuests,
+              });
+            }}>
+            <Text style={styles.buttonText}>
+              View {queue.eventName ? `(${queue.eventName})` : queue.code}
+            </Text>
+          </Pressable>
+        ))}
       </View>
     </SafeAreaProvider>
   );
