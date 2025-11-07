@@ -218,7 +218,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
             hostAuthToken: created.hostAuthToken,
             joinUrl: created.joinUrl,
             eventName: created.eventName,
-            maxGuests: created.maxGuests
+            maxGuests: created.maxGuests,
+            createdAt: Date.now()
           });
         } catch (error) {
           console.warn('Failed to store queue details:', error);
