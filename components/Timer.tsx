@@ -1,76 +1,92 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Button } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
-export default function Timer() {
-  const [hours, setHours] = useState('');
-  const [minutes, setMinutes] = useState('');
-  const [seconds, setSeconds] = useState('');
-  const [remaining, setRemaining] = useState(0);
-  const [running, setRunning] = useState(false);
+type TimerProps = {
+  targetTimestamp?: number | null;
+  label?: string;
+  onExpire?: () => void;
+  compact?: boolean;
+};
 
-  // Convert user input into total seconds and start countdown
-  const startTimer = () => {
-    const total =
-      (parseInt(hours || '0') * 3600) +
-      (parseInt(minutes || '0') * 60) +
-      parseInt(seconds || '0');
-    if (total > 0) {
-      setRemaining(total);
-      setRunning(true);
-    }
-  };
+function computeRemainingSeconds(target?: number | null): number {
+  if (typeof target !== 'number' || Number.isNaN(target)) {
+    return 0;
+  }
+  const diff = Math.max(0, Math.ceil((target - Date.now()) / 1000));
+  return diff;
+}
 
-  // Timer countdown effect
+function format(durationSeconds: number): string {
+  const minutes = Math.floor(durationSeconds / 60);
+  const seconds = durationSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+export default function Timer({ targetTimestamp, label, onExpire, compact }: TimerProps) {
+  const [remaining, setRemaining] = useState(() => computeRemainingSeconds(targetTimestamp));
+
   useEffect(() => {
-    if (!running) return;
-    if (remaining <= 0) {
-      setRunning(false);
-      alert('Time is up!');
-      return;
+    if (typeof targetTimestamp !== 'number' || Number.isNaN(targetTimestamp)) {
+      setRemaining(0);
+      return undefined;
     }
-    const interval = setInterval(() => setRemaining(r => r - 1), 1000);
-    return () => clearInterval(interval);
-  }, [running, remaining]);
 
-  // Convert remaining seconds → H:M:S format
-  const h = Math.floor(remaining / 3600);
-  const m = Math.floor((remaining % 3600) / 60);
-  const s = remaining % 60;
+    const tick = () => {
+      setRemaining((prev) => {
+        const next = computeRemainingSeconds(targetTimestamp);
+        if (next === 0 && prev !== 0) {
+          onExpire?.();
+        }
+        return next;
+      });
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [targetTimestamp, onExpire]);
+
+  const display = useMemo(() => {
+    if (typeof targetTimestamp !== 'number' || Number.isNaN(targetTimestamp)) {
+      return '--:--';
+    }
+    return format(remaining);
+  }, [remaining, targetTimestamp]);
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-      {!running ? (
-        <>
-          <TextInput
-            placeholder="Hours"
-            value={hours}
-            onChangeText={setHours}
-            keyboardType="numeric"
-            style={{ borderWidth: 1, padding: 8, width: 100, textAlign: 'center' }}
-          />
-          <TextInput
-            placeholder="Minutes"
-            value={minutes}
-            onChangeText={setMinutes}
-            keyboardType="numeric"
-            style={{ borderWidth: 1, padding: 8, width: 100, textAlign: 'center' }}
-          />
-          <TextInput
-            placeholder="Seconds"
-            value={seconds}
-            onChangeText={setSeconds}
-            keyboardType="numeric"
-            style={{ borderWidth: 1, padding: 8, width: 100, textAlign: 'center' }}
-          />
-          <Button title="Start Timer" onPress={startTimer} />
-        </>
-      ) : (
-        <Text style={{ fontSize: 40, fontWeight: 'bold' }}>
-          {`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s
-            .toString()
-            .padStart(2, '0')}`}
-        </Text>
-      )}
+    <View style={[styles.container, compact ? styles.compactContainer : undefined]}>
+      {/* {label ? <Text style={styles.label}>{label}</Text> : null} */}
+      <Text style={[styles.timeText, compact ? styles.compactText : undefined]}>{display}</Text>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(239, 104, 104, 0.5)',
+    borderColor: '#ef6868',
+    padding: 6,
+    borderRadius: 8,
+    width: 'fit-content',
+    borderWidth: 1,
+  },
+  compactContainer: {
+    gap: 4,
+  },
+  label: {
+    fontSize: 14,
+    color: '#555',
+    fontWeight: '600',
+  },
+  timeText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111',
+  },
+  compactText: {
+    fontSize: 18,
+  },
+});

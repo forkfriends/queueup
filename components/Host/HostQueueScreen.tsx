@@ -29,11 +29,18 @@ import {
 } from '../../lib/backend';
 import { Copy, Check } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
+import Timer from '../Timer';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
 type HostMessage =
-  | { type: 'queue_update'; queue?: HostParty[]; nowServing?: HostParty | null; maxGuests?: number }
+  | {
+      type: 'queue_update';
+      queue?: HostParty[];
+      nowServing?: HostParty | null;
+      maxGuests?: number;
+      callDeadline?: number | null;
+    }
   | Record<string, unknown>;
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -79,6 +86,7 @@ export default function HostQueueScreen({ route }: Props) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [queue, setQueue] = useState<HostParty[]>([]);
   const [nowServing, setNowServing] = useState<HostParty | null>(null);
+  const [callDeadline, setCallDeadline] = useState<number | null>(null);
   const [closed, setClosed] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
@@ -154,6 +162,9 @@ export default function HostQueueScreen({ route }: Props) {
         if (typeof parsed.maxGuests === 'number') {
           setCapacity(parsed.maxGuests);
         }
+        const deadlineValue =
+          typeof parsed.callDeadline === 'number' ? parsed.callDeadline : null;
+        setCallDeadline(serving ? deadlineValue : null);
         if (queueEntries.length > 0 || serving) {
           setClosed(false);
         }
@@ -161,6 +172,7 @@ export default function HostQueueScreen({ route }: Props) {
       } else if (parsed.type === 'closed') {
         setQueue([]);
         setNowServing(null);
+        setCallDeadline(null);
         setClosed(true);
       }
     } catch {
@@ -254,7 +266,11 @@ export default function HostQueueScreen({ route }: Props) {
           servedPartyId: nowServing?.id,
           nextPartyId,
         });
-        setNowServing(result.nowServing ?? null);
+        const updatedNowServing = result.nowServing ?? null;
+        setNowServing(updatedNowServing);
+        if (!updatedNowServing) {
+          setCallDeadline(null);
+        }
         setConnectionError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to advance queue';
@@ -749,6 +765,11 @@ export default function HostQueueScreen({ route }: Props) {
               }`
             : 'No party currently called.'}
         </Text>
+        {nowServing &&
+          <View style={styles.timerRow}>
+            <Timer targetTimestamp={callDeadline ?? null} label="Time left" compact />
+          </View>
+        }
       </View>
 
       <View style={styles.queueCard}>

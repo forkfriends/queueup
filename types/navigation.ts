@@ -11,4 +11,15 @@ export type RootStackParamList = {
     eventName?: string;
     maxGuests?: number;
   };
+  GuestQueueScreen: {
+    code: string;
+    partyId: string;
+    sessionId?: string | null;
+    initialPosition?: number;
+    initialAheadCount?: number;
+    initialQueueLength?: number | null;
+    initialEtaMs?: number | null;
+    guestName?: string;
+    partySize?: number;
+  };
 };

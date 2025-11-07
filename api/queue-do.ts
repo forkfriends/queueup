@@ -20,12 +20,15 @@ interface StoredState {
   closed?: boolean;
   pendingPartyId?: string | null;
   maxGuests?: number;
+  callDeadline?: number | null;
 }
 
 type ConnectionInfo = { role: 'host' } | { role: 'guest'; partyId: string };
 
 const CALL_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_MAX_GUESTS = 100;
+const AVERAGE_SERVICE_MINUTES = 3;
+const MS_PER_MINUTE = 60 * 1000;
 
 function logPrefix(sessionId: string, scope: string): string {
   return `[QueueDO ${sessionId}] ${scope}:`;
@@ -38,6 +41,7 @@ export class QueueDO implements DurableObject {
   private pendingPartyId: string | null = null;
   private closed = false;
   private maxGuests = DEFAULT_MAX_GUESTS;
+  private callDeadline: number | null = null;
 
   private sockets = new Map<WebSocket, ConnectionInfo>();
   private guestSockets = new Map<string, Set<WebSocket>>();
@@ -155,8 +159,16 @@ export class QueueDO implements DurableObject {
     const aheadWaiting = this.queue.length - 1;
     const aheadCount = aheadWaiting + (this.nowServing ? 1 : 0);
     const position = aheadCount + 1;
+    const queueLength = this.computeQueueLength();
+    const estimatedWaitMs = this.estimateWaitMs(aheadCount);
 
-    return this.jsonResponse({ partyId: party.id, position, sessionId: this.sessionId });
+    return this.jsonResponse({
+      partyId: party.id,
+      position,
+      sessionId: this.sessionId,
+      queueLength,
+      estimatedWaitMs,
+    });
   }
 
   private async handleDeclareNearby(request: Request): Promise<Response> {
@@ -273,6 +285,7 @@ export class QueueDO implements DurableObject {
     this.queue = [];
     this.nowServing = null;
     this.pendingPartyId = null;
+    this.callDeadline = null;
 
     await this.env.DB.batch([
       this.env.DB.prepare("UPDATE sessions SET status = 'closed' WHERE id = ?1").bind(
@@ -447,6 +460,7 @@ export class QueueDO implements DurableObject {
       this.nowServing = null;
       this.pendingPartyId = null;
       await this.state.storage.deleteAlarm();
+      this.callDeadline = null;
     }
 
     let selectedParty: QueueParty | undefined;
@@ -464,6 +478,7 @@ export class QueueDO implements DurableObject {
       selectedParty.status = 'called';
       this.nowServing = selectedParty;
       this.pendingPartyId = selectedParty.id;
+      this.callDeadline = Date.now() + CALL_TIMEOUT_MS;
 
       await this.env.DB.batch([
         this.env.DB.prepare("UPDATE parties SET status = 'called' WHERE id = ?1").bind(
@@ -474,7 +489,7 @@ export class QueueDO implements DurableObject {
         ).bind(this.sessionId, selectedParty.id, JSON.stringify({ action: 'called' })),
       ]);
 
-      await this.state.storage.setAlarm(Date.now() + CALL_TIMEOUT_MS);
+      await this.state.storage.setAlarm(this.callDeadline);
       await this.persistState();
 
       this.notifyGuestCalled(selectedParty.id);
@@ -483,6 +498,7 @@ export class QueueDO implements DurableObject {
       this.nowServing = null;
       this.pendingPartyId = null;
       await this.state.storage.deleteAlarm();
+      this.callDeadline = null;
       await this.persistState();
     }
 
@@ -514,6 +530,7 @@ export class QueueDO implements DurableObject {
     this.notifyGuestRemoval(partyId, 'no_show');
     this.nowServing = null;
     this.pendingPartyId = null;
+    this.callDeadline = null;
     await this.persistState();
   }
 
@@ -522,6 +539,7 @@ export class QueueDO implements DurableObject {
       this.nowServing = null;
       this.pendingPartyId = null;
       await this.state.storage.deleteAlarm();
+      this.callDeadline = null;
     } else {
       const index = this.queue.findIndex((entry) => entry.id === partyId);
       if (index === -1) {
@@ -561,6 +579,7 @@ export class QueueDO implements DurableObject {
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
       maxGuests: this.maxGuests,
+      callDeadline: this.callDeadline,
     });
 
     for (const [socket, info] of this.sockets.entries()) {
@@ -575,11 +594,10 @@ export class QueueDO implements DurableObject {
       if (this.nowServing && this.nowServing.id === partyId) {
         continue;
       }
-      const { position, aheadCount } = this.computePosition(partyId);
+      const payload = this.buildGuestPositionPayload(partyId);
       const message = JSON.stringify({
         type: 'position',
-        position,
-        aheadCount,
+        ...payload,
       });
       for (const socket of sockets) {
         this.safeSend(socket, message);
@@ -590,7 +608,7 @@ export class QueueDO implements DurableObject {
   private notifyGuestCalled(partyId: string): void {
     const sockets = this.guestSockets.get(partyId);
     if (!sockets) return;
-    const message = JSON.stringify({ type: 'called' });
+    const message = JSON.stringify({ type: 'called', deadline: this.callDeadline ?? null });
     for (const socket of sockets) {
       this.safeSend(socket, message);
     }
@@ -723,6 +741,7 @@ export class QueueDO implements DurableObject {
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
       maxGuests: this.maxGuests,
+      callDeadline: this.callDeadline,
     });
     this.safeSend(socket, message);
   }
@@ -735,7 +754,10 @@ export class QueueDO implements DurableObject {
     }
 
     if (this.nowServing && this.nowServing.id === partyId) {
-      this.safeSend(socket, JSON.stringify({ type: 'called' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: 'called', deadline: this.callDeadline ?? null })
+      );
       return;
     }
 
@@ -745,8 +767,8 @@ export class QueueDO implements DurableObject {
       return;
     }
 
-    const { position, aheadCount } = this.computePosition(partyId);
-    this.safeSend(socket, JSON.stringify({ type: 'position', position, aheadCount }));
+    const payload = this.buildGuestPositionPayload(partyId);
+    this.safeSend(socket, JSON.stringify({ type: 'position', ...payload }));
   }
 
   private computePosition(partyId: string): { position: number; aheadCount: number } {
@@ -757,6 +779,30 @@ export class QueueDO implements DurableObject {
       aheadCount,
       position: aheadCount + 1,
     };
+  }
+
+  private buildGuestPositionPayload(partyId: string): {
+    position: number;
+    aheadCount: number;
+    queueLength: number;
+    estimatedWaitMs: number;
+  } {
+    const { position, aheadCount } = this.computePosition(partyId);
+    return {
+      position,
+      aheadCount,
+      queueLength: this.computeQueueLength(),
+      estimatedWaitMs: this.estimateWaitMs(aheadCount),
+    };
+  }
+
+  private computeQueueLength(): number {
+    return this.queue.length + (this.nowServing ? 1 : 0);
+  }
+
+  private estimateWaitMs(aheadCount: number): number {
+    const safeAhead = Math.max(0, aheadCount);
+    return safeAhead * AVERAGE_SERVICE_MINUTES * MS_PER_MINUTE;
   }
 
   private computeGuestCount(): number {
@@ -805,6 +851,7 @@ export class QueueDO implements DurableObject {
       this.closed = stored.closed ?? false;
       this.pendingPartyId = stored.pendingPartyId ?? (this.nowServing ? this.nowServing.id : null);
       this.maxGuests = stored.maxGuests ?? DEFAULT_MAX_GUESTS;
+      this.callDeadline = stored.callDeadline ?? null;
       return;
     }
 
@@ -841,6 +888,7 @@ export class QueueDO implements DurableObject {
 
     this.queue = [];
     this.nowServing = null;
+    this.callDeadline = null;
     if (results) {
       for (const row of results) {
         const sizeValue =
@@ -872,6 +920,7 @@ export class QueueDO implements DurableObject {
       closed: this.closed,
       pendingPartyId: this.pendingPartyId,
       maxGuests: this.maxGuests,
+      callDeadline: this.callDeadline,
     });
   }
 
