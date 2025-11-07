@@ -9,7 +9,7 @@ const DEFAULT_LOCALHOST = Platform.select({
 const rawApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
 const apiBaseUrlWithDefault = rawApiBaseUrl ?? DEFAULT_LOCALHOST;
 const apiBaseUrlSanitized = apiBaseUrlWithDefault ? apiBaseUrlWithDefault.replace(/\/$/, '') : '';
-const API_BASE_URL = apiBaseUrlSanitized ?? '';
+export const API_BASE_URL = apiBaseUrlSanitized ?? '';
 
 export interface CreateQueueResult {
   code: string;
@@ -24,6 +24,7 @@ export interface CreateQueueResult {
 export interface CreateQueueParams {
   eventName: string;
   maxGuests: number;
+  turnstileToken?: string;
 }
 
 export const HOST_COOKIE_NAME = 'queue_host_auth';
@@ -59,7 +60,7 @@ function extractHostToken(setCookieHeader: string | null): string | undefined {
 const MIN_QUEUE_CAPACITY = 1;
 const MAX_QUEUE_CAPACITY = 100;
 
-export async function createQueue({ eventName, maxGuests }: CreateQueueParams): Promise<CreateQueueResult> {
+export async function createQueue({ eventName, maxGuests, turnstileToken }: CreateQueueParams): Promise<CreateQueueResult> {
   const trimmedEventName = eventName.trim();
   const normalizedMaxGuests = Number.isFinite(maxGuests)
     ? Math.min(MAX_QUEUE_CAPACITY, Math.max(MIN_QUEUE_CAPACITY, Math.round(maxGuests)))
@@ -67,6 +68,7 @@ export async function createQueue({ eventName, maxGuests }: CreateQueueParams): 
   const body = {
     eventName: trimmedEventName,
     maxGuests: normalizedMaxGuests,
+    ...(turnstileToken && { turnstileToken }),
   };
   const response = await fetch(`${API_BASE_URL}/api/queue/create`, {
     method: 'POST',
@@ -88,17 +90,22 @@ export interface JoinQueueParams {
   code: string;
   name?: string;
   size?: number;
+  turnstileToken?: string;
 }
 
 export interface JoinQueueResult {
   partyId: string;
   position: number;
+  sessionId?: string;
+  queueLength?: number;
+  estimatedWaitMs?: number;
 }
 
-export async function joinQueue({ code, name, size }: JoinQueueParams): Promise<JoinQueueResult> {
+export async function joinQueue({ code, name, size, turnstileToken }: JoinQueueParams): Promise<JoinQueueResult> {
   const payload = {
     name: name?.trim() || undefined,
     size: size && Number.isFinite(size) ? size : undefined,
+    ...(turnstileToken && { turnstileToken }),
   };
 
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/join`, {
@@ -165,6 +172,49 @@ export function buildGuestConnectUrl(code: string, partyId: string): string {
   } catch {
     const separator = base.includes('?') ? '&' : '?';
     return toWebSocketUrl(`${base}${separator}partyId=${encodeURIComponent(partyId)}`);
+  }
+}
+
+export async function getVapidPublicKey(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/push/vapid`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { publicKey: string | null };
+    return data.publicKey ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Minimal PushSubscription-like type to avoid DOM typing requirements in RN builds
+export interface PushSubscriptionParams {
+  endpoint: string;
+  keys?: {
+    p256dh?: string;
+    auth?: string;
+  };
+  expirationTime?: number | null;
+  options?: unknown;
+  [key: string]: unknown; // Allow extra fields for flexibility
+}
+
+export async function savePushSubscription(params: {
+  sessionId: string;
+  partyId: string;
+  subscription: PushSubscriptionParams;
+}): Promise<void> {
+  const body = {
+    sessionId: params.sessionId,
+    partyId: params.partyId,
+    subscription: params.subscription,
+  };
+  const res = await fetch(`${API_BASE_URL}/api/push/subscribe`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to save subscription');
   }
 }
 

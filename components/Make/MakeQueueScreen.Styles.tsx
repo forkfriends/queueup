@@ -6,6 +6,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 24,
+    flexGrow: 1,
   },
   title: {
     fontSize: 28,
@@ -145,6 +146,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#888',
   },
   buttonText: {
     color: '#fff',

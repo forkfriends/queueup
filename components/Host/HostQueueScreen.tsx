@@ -27,13 +27,20 @@ import {
   HostParty,
   buildHostConnectUrl,
 } from '../../lib/backend';
-import { Copy } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons';
 import { storage } from '../../utils/storage';
+import Timer from '../Timer';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
 type HostMessage =
-  | { type: 'queue_update'; queue?: HostParty[]; nowServing?: HostParty | null; maxGuests?: number }
+  | {
+      type: 'queue_update';
+      queue?: HostParty[];
+      nowServing?: HostParty | null;
+      maxGuests?: number;
+      callDeadline?: number | null;
+    }
   | Record<string, unknown>;
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -79,10 +86,12 @@ export default function HostQueueScreen({ route }: Props) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [queue, setQueue] = useState<HostParty[]>([]);
   const [nowServing, setNowServing] = useState<HostParty | null>(null);
+  const [callDeadline, setCallDeadline] = useState<number | null>(null);
   const [closed, setClosed] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
   const [closeConfirmVisibleWeb, setCloseConfirmVisibleWeb] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const isWeb = Platform.OS === 'web';
   const [savingQr, setSavingQr] = useState(false);
 
@@ -153,6 +162,9 @@ export default function HostQueueScreen({ route }: Props) {
         if (typeof parsed.maxGuests === 'number') {
           setCapacity(parsed.maxGuests);
         }
+        const deadlineValue =
+          typeof parsed.callDeadline === 'number' ? parsed.callDeadline : null;
+        setCallDeadline(serving ? deadlineValue : null);
         if (queueEntries.length > 0 || serving) {
           setClosed(false);
         }
@@ -160,6 +172,7 @@ export default function HostQueueScreen({ route }: Props) {
       } else if (parsed.type === 'closed') {
         setQueue([]);
         setNowServing(null);
+        setCallDeadline(null);
         setClosed(true);
       }
     } catch {
@@ -253,7 +266,11 @@ export default function HostQueueScreen({ route }: Props) {
           servedPartyId: nowServing?.id,
           nextPartyId,
         });
-        setNowServing(result.nowServing ?? null);
+        const updatedNowServing = result.nowServing ?? null;
+        setNowServing(updatedNowServing);
+        if (!updatedNowServing) {
+          setCallDeadline(null);
+        }
         setConnectionError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to advance queue';
@@ -276,9 +293,23 @@ export default function HostQueueScreen({ route }: Props) {
     advance();
   }, [advance]);
 
+  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleCopyCode = useCallback(async () => {
     try {
       await Clipboard.setStringAsync(code);
+      setCodeCopied(true);
+      
+      // Clear any existing timeout
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      
+      // Reset the icon back to copy after 3 seconds
+      copyTimeoutRef.current = setTimeout(() => {
+        setCodeCopied(false);
+      }, 3000);
+      
       if (Platform.OS === 'android') {
         ToastAndroid.show('Queue code copied', ToastAndroid.SHORT);
       } else {
@@ -289,6 +320,15 @@ export default function HostQueueScreen({ route }: Props) {
       Alert.alert('Copy failed', 'Unable to copy the queue code. Try again.');
     }
   }, [code]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleShareQr = useCallback(async () => {
     if (!shareableLink) {
@@ -627,7 +667,11 @@ export default function HostQueueScreen({ route }: Props) {
             onPress={handleCopyCode}
             accessibilityRole="button"
             accessibilityLabel="Copy queue code to clipboard">
-            <Copy style={styles.headerCopyText} size={14} />
+            {codeCopied ? (
+              <Feather name="check" color="#222" size={14} />
+            ) : (
+              <Feather name="copy" color="#222" size={14} />
+            )}
           </Pressable>
         </View>
         {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
@@ -725,6 +769,11 @@ export default function HostQueueScreen({ route }: Props) {
               }`
             : 'No party currently called.'}
         </Text>
+        {nowServing ? (
+          <View style={styles.timerRow}>
+            <Timer targetTimestamp={callDeadline ?? null} label="Time left" compact />
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.queueCard}>
@@ -770,16 +819,12 @@ export default function HostQueueScreen({ route }: Props) {
 
   return (
     <SafeAreaProvider style={styles.safe}>
-      {isWeb ? (
-        <View style={[styles.containerFixed, styles.containerContent]}>{content}</View>
-      ) : (
-        <ScrollView
-          style={styles.mobileScroll}
-          contentContainerStyle={styles.containerContent}
-          keyboardShouldPersistTaps="handled">
-          {content}
-        </ScrollView>
-      )}
+      <ScrollView
+        style={styles.mobileScroll}
+        contentContainerStyle={styles.containerContent}
+        keyboardShouldPersistTaps="handled">
+        {content}
+      </ScrollView>
       {webCloseModal}
     </SafeAreaProvider>
   );
