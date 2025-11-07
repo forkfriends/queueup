@@ -1,3 +1,4 @@
+import { buildPushPayload } from '@block65/webcrypto-web-push';
 import {
   HOST_COOKIE_MAX_AGE_SECONDS,
   HOST_COOKIE_NAME,
@@ -12,6 +13,8 @@ export interface Env {
   DB: D1Database;
   TURNSTILE_SECRET_KEY: string;
   HOST_AUTH_SECRET: string;
+  VAPID_PUBLIC?: string;
+  VAPID_PRIVATE?: string;
   ALLOWED_ORIGINS?: string;
   TURNSTILE_BYPASS?: string;
   TEST_MODE?: string;
@@ -62,6 +65,99 @@ export default {
       return applyCors(new Response(null, { status: 204 }), corsOrigin, undefined, true);
     }
 
+    // Push API: VAPID public key
+    if (request.method === 'GET' && url.pathname === '/api/push/vapid') {
+      const body = JSON.stringify({ publicKey: env.VAPID_PUBLIC ?? null });
+      return applyCors(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }), corsOrigin);
+    }
+
+    // Push API: subscribe
+    if (request.method === 'POST' && url.pathname === '/api/push/subscribe') {
+      try {
+        const { sessionId, partyId, subscription } = (await readJson(request)) ?? {};
+        if (!sessionId || !partyId || !subscription || !subscription.endpoint || !subscription.keys) {
+          return applyCors(jsonError('Invalid subscription payload', 400), corsOrigin);
+        }
+        const { endpoint, keys } = subscription as { endpoint: string; keys: { p256dh: string; auth: string } };
+        await env.DB
+          .prepare(
+            `INSERT INTO push_subscriptions (session_id, party_id, endpoint, p256dh, auth)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(endpoint) DO UPDATE SET
+               session_id=excluded.session_id,
+               party_id=excluded.party_id,
+               p256dh=excluded.p256dh,
+               auth=excluded.auth,
+               created_at=strftime('%s','now')`
+          )
+          .bind(sessionId, partyId, endpoint, keys.p256dh, keys.auth)
+          .run();
+
+        if (env.VAPID_PUBLIC && env.VAPID_PRIVATE) {
+          ctx.waitUntil(
+            sendPushNotification(env, {
+              sessionId,
+              partyId,
+              subscription: { endpoint, p256dh: keys.p256dh, auth: keys.auth },
+              title: 'You joined the queue',
+              body: 'We will alert you as you get closer to the front.',
+              url: buildAppUrl(env),
+              kind: 'join_confirm',
+            }).catch((err) => console.warn('join push error', err))
+          );
+        }
+        return applyCors(new Response('ok'), corsOrigin);
+      } catch (e) {
+        console.error('subscribe error', e);
+        return applyCors(new Response('fail', { status: 500 }), corsOrigin);
+      }
+    }
+
+    // Track events (notif clicks, etc.)
+    if (request.method === 'POST' && url.pathname === '/api/track') {
+      try {
+        const { sessionId, partyId, type, meta } = (await readJson(request)) ?? {};
+        if (!type) return applyCors(jsonError('type required', 400), corsOrigin);
+        await env.DB.prepare(
+          'INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, ?3, ?4)'
+        ).bind(sessionId ?? null, partyId ?? null, String(type), meta ? JSON.stringify(meta) : null).run();
+        return applyCors(new Response('ok'), corsOrigin);
+      } catch (e) {
+        console.error('track error', e);
+        return applyCors(new Response('fail', { status: 500 }), corsOrigin);
+      }
+    }
+
+    // Manual test push endpoint
+    if (request.method === 'POST' && url.pathname === '/api/push/test') {
+      try {
+        const { sessionId, partyId, title, body, url: targetUrl } = (await readJson(request)) ?? {};
+        if (!sessionId || !partyId) return applyCors(jsonError('sessionId and partyId required', 400), corsOrigin);
+        const sub = await env.DB.prepare(
+          'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE session_id=?1 AND party_id=?2 ORDER BY created_at DESC LIMIT 1'
+        ).bind(sessionId, partyId).first<{ endpoint: string; p256dh: string; auth: string }>();
+        if (!sub) return applyCors(new Response('no subscription', { status: 404 }), corsOrigin);
+        if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return applyCors(new Response('vapid not set', { status: 500 }), corsOrigin);
+        const sent = await sendPushNotification(env, {
+          sessionId,
+          partyId,
+          subscription: { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+          title: title || 'QueueUp',
+          body: body || 'Hello!',
+          url: targetUrl || '/',
+          kind: 'test',
+          dedupe: false,
+        });
+        if (!sent) {
+          return applyCors(new Response('stale removed', { status: 410 }), corsOrigin);
+        }
+        return applyCors(new Response('sent'), corsOrigin);
+      } catch (e) {
+        console.error('push test error', e);
+        return applyCors(new Response('fail', { status: 500 }), corsOrigin);
+      }
+    }
+
     const match = ROUTE.exec(url.pathname);
     if (!match) {
       return applyCors(new Response('Not found', { status: 404 }), corsOrigin);
@@ -99,6 +195,104 @@ export default {
     // Scheduled cleanup will arrive in later checkpoints.
   },
 };
+
+async function sendPushNotification(
+  env: Env,
+  params: {
+    sessionId: string;
+    partyId: string;
+    subscription: { endpoint: string; p256dh: string; auth: string };
+    title: string;
+    body: string;
+    url?: string;
+    kind?: string;
+    dedupe?: boolean;
+  }
+): Promise<boolean> {
+  if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) {
+    return false;
+  }
+
+  if (params.kind && params.dedupe !== false) {
+    const exists = await env.DB.prepare(
+      "SELECT 1 AS x FROM events WHERE session_id=?1 AND party_id=?2 AND type='push_sent' AND details LIKE ?3 LIMIT 1"
+    )
+      .bind(params.sessionId, params.partyId, `%\"kind\":\"${params.kind}\"%`)
+      .first<{ x: number }>();
+    if (exists?.x) {
+      return true;
+    }
+  }
+
+  try {
+    const payload = await buildPushPayload(
+      {
+        data: JSON.stringify({ title: params.title, body: params.body, url: params.url ?? '/' }),
+        options: { ttl: 60 },
+      },
+      {
+        endpoint: params.subscription.endpoint,
+        keys: { p256dh: params.subscription.p256dh, auth: params.subscription.auth },
+        expirationTime: null,
+      },
+      {
+        subject: 'mailto:team@queue-up.app',
+        publicKey: env.VAPID_PUBLIC,
+        privateKey: env.VAPID_PRIVATE,
+      }
+    );
+
+    const resp = await fetch(params.subscription.endpoint, {
+      method: payload.method,
+      headers: payload.headers as any,
+      body: payload.body as any,
+    });
+
+    if (!resp.ok && (resp.status === 404 || resp.status === 410)) {
+      await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint=?1')
+        .bind(params.subscription.endpoint)
+        .run();
+      return false;
+    }
+
+    if (!resp.ok) {
+      console.warn('push delivery failed', resp.status, await resp.text());
+      return false;
+    }
+
+    if (params.kind) {
+      await env.DB.prepare(
+        "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'push_sent', ?3)"
+      )
+        .bind(params.sessionId, params.partyId, JSON.stringify({ kind: params.kind }))
+        .run();
+    }
+
+    return true;
+  } catch (error: any) {
+    const status = error?.status ?? error?.code;
+    if (status === 404 || status === 410) {
+      await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint=?1')
+        .bind(params.subscription.endpoint)
+        .run()
+        .catch(() => {});
+    }
+    console.warn('sendPushNotification error', error);
+    return false;
+  }
+}
+
+function buildAppUrl(env: Env): string {
+  const base =
+    env.APP_BASE_URL && env.APP_BASE_URL.trim().length > 0
+      ? env.APP_BASE_URL.trim()
+      : DEFAULT_APP_BASE_URL;
+  try {
+    return new URL(base).toString();
+  } catch {
+    return DEFAULT_APP_BASE_URL;
+  }
+}
 
 async function handleCreate(
   request: Request,

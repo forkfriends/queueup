@@ -8,12 +8,16 @@
     "prebuild": "expo prebuild",
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
     "format": "eslint \"**/*.{js,jsx,ts,tsx}\" --fix && prettier \"**/*.{js,jsx,ts,tsx,json}\" --write",
+    "preweb": "mkdir -p public && cp docs/sw.js public/sw.js",
     "web": "expo start --web",
-    "migrate:apply": "wrangler d1 migrations apply DB",
+    "build:web": "mkdir -p public && cp docs/sw.js public/sw.js && expo export --platform web --output-dir docs",
+    "deploy:apply": "wrangler d1 migrations apply DB",
+    "deploy:push": "wrangler deploy --config api/wrangler.toml",
     "test": "vitest run --config api/vitest.config.ts",
     "test:watch": "vitest --config api/vitest.config.ts"
   },
   "dependencies": {
+    "@block65/webcrypto-web-push": "^1.0.2",
     "@react-native-community/datetimepicker": "^8.1.2",
     "@react-native-community/slider": "^4.5.2",
     "@react-navigation/native": "^7.1.18",

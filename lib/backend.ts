@@ -9,7 +9,7 @@ const DEFAULT_LOCALHOST = Platform.select({
 const rawApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
 const apiBaseUrlWithDefault = rawApiBaseUrl ?? DEFAULT_LOCALHOST;
 const apiBaseUrlSanitized = apiBaseUrlWithDefault ? apiBaseUrlWithDefault.replace(/\/$/, '') : '';
-const API_BASE_URL = apiBaseUrlSanitized ?? '';
+export const API_BASE_URL = apiBaseUrlSanitized ?? '';
 
 export interface CreateQueueResult {
   code: string;
@@ -93,6 +93,7 @@ export interface JoinQueueParams {
 export interface JoinQueueResult {
   partyId: string;
   position: number;
+  sessionId?: string;
 }
 
 export async function joinQueue({ code, name, size }: JoinQueueParams): Promise<JoinQueueResult> {
@@ -165,6 +166,38 @@ export function buildGuestConnectUrl(code: string, partyId: string): string {
   } catch {
     const separator = base.includes('?') ? '&' : '?';
     return toWebSocketUrl(`${base}${separator}partyId=${encodeURIComponent(partyId)}`);
+  }
+}
+
+export async function getVapidPublicKey(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/push/vapid`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { publicKey: string | null };
+    return data.publicKey ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePushSubscription(params: {
+  sessionId: string;
+  partyId: string;
+  // use any to avoid DOM typing requirements in RN builds
+  subscription: any;
+}): Promise<void> {
+  const body = {
+    sessionId: params.sessionId,
+    partyId: params.partyId,
+    subscription: (params.subscription as any),
+  };
+  const res = await fetch(`${API_BASE_URL}/api/push/subscribe`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to save subscription');
   }
 }
 

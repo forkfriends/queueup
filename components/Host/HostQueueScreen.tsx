@@ -603,7 +603,7 @@ export default function HostQueueScreen({ route }: Props) {
             onPress={handleCopyCode}
             accessibilityRole="button"
             accessibilityLabel="Copy queue code to clipboard">
-            <Copy style={styles.headerCopyText} size={14} />
+            <Copy color="#222" size={14} />
           </Pressable>
         </View>
         {/* <Text style={styles.headerLine}>Session ID: {sessionId}</Text>
@@ -746,16 +746,12 @@ export default function HostQueueScreen({ route }: Props) {
 
   return (
     <SafeAreaProvider style={styles.safe}>
-      {isWeb ? (
-        <View style={[styles.containerFixed, styles.containerContent]}>{content}</View>
-      ) : (
-        <ScrollView
-          style={styles.mobileScroll}
-          contentContainerStyle={styles.containerContent}
-          keyboardShouldPersistTaps="handled">
-          {content}
-        </ScrollView>
-      )}
+      <ScrollView
+        style={styles.mobileScroll}
+        contentContainerStyle={styles.containerContent}
+        keyboardShouldPersistTaps="handled">
+        {content}
+      </ScrollView>
       {webCloseModal}
     </SafeAreaProvider>
   );

@@ -230,7 +230,11 @@ export default function MakeQueueScreen({ navigation }: Props) {
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', android: undefined })}
         style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView 
+          contentContainerStyle={styles.scroll} 
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled"
+        >
           <Text style={styles.title}>Make Queue</Text>
 
           <View style={styles.card}>

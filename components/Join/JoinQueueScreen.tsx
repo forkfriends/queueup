@@ -17,7 +17,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
-import { buildGuestConnectUrl, joinQueue, leaveQueue } from '../../lib/backend';
+import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -40,11 +40,15 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   );
   const [joinedCode, setJoinedCode] = useState<string | null>(null);
   const [partyId, setPartyId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [pushReady, setPushReady] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldReconnectRef = useRef(false);
+  const autoPushAttemptRef = useRef<string | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
@@ -89,6 +93,16 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       setResultText(`You're number ${joinResult.position} in line. We'll keep this updated.`);
       setJoinedCode(trimmed);
       setPartyId(joinResult.partyId);
+      setSessionId(joinResult.sessionId ?? null);
+      // Debug: log identifiers for wrangler-side push testing
+      if (typeof window !== 'undefined' && (window as any).console) {
+        console.log('[QueueUp][join]', {
+          ts: new Date().toISOString(),
+          sessionId: joinResult.sessionId ?? null,
+          partyId: joinResult.partyId,
+          code: trimmed,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error joining queue';
       Alert.alert('Unable to join queue', message);
@@ -169,6 +183,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       reconnectAttempt.current = 0;
       setJoinedCode(null);
       setPartyId(null);
+      setSessionId(null);
+      setPushReady(false);
+      setPushMessage(null);
+      autoPushAttemptRef.current = null;
       setConnectionState('idle');
       if (message !== undefined) {
         setResultText(message);
@@ -268,12 +286,115 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     };
   }, [joinedCode, partyId, clearReconnect, closeActiveSocket, resetSession]);
 
+  const enablePush = useCallback(
+    async (options?: { sessionOverride?: string | null; partyOverride?: string | null; silent?: boolean }) => {
+      if (Platform.OS !== 'web') {
+        return;
+      }
+      const targetSession = options?.sessionOverride ?? sessionId;
+      const targetParty = options?.partyOverride ?? partyId;
+      if (!targetSession || !targetParty) {
+        return;
+      }
+      if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+        return;
+      }
+      const hasServiceWorker = 'serviceWorker' in navigator;
+      const hasPushManager = 'PushManager' in window;
+      const hasNotificationApi = typeof Notification !== 'undefined';
+      if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
+        setPushMessage('Notifications not supported in this browser.');
+        if (!options?.silent) {
+          Alert.alert('Push not supported', 'This browser does not support web push notifications.');
+        }
+        return;
+      }
+      try {
+        setPushMessage('Enabling notifications…');
+        const publicKey = await getVapidPublicKey();
+        if (!publicKey) {
+          throw new Error('Missing VAPID key');
+        }
+        const b64ToU8 = (b64: string) =>
+          Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+        const isGhPages = window.location.pathname.startsWith('/queueup');
+        const swPath = isGhPages ? '/queueup/sw.js' : '/sw.js';
+        const swScope = isGhPages ? '/queueup/' : '/';
+        const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
+        let subscription = await registration.pushManager.getSubscription();
+        const requestPermission = async () => {
+          if (Notification.permission === 'granted') {
+            return 'granted' as NotificationPermission;
+          }
+          if (Notification.permission === 'denied') {
+            return 'denied' as NotificationPermission;
+          }
+          return Notification.requestPermission();
+        };
+        if (!subscription) {
+          const perm = await requestPermission();
+          if (perm !== 'granted') {
+            setPushMessage('Notifications are blocked in your browser settings.');
+            if (!options?.silent) {
+              Alert.alert(
+                'Notifications blocked',
+                'Enable notifications in your browser settings to receive alerts.'
+              );
+            }
+            return;
+          }
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: b64ToU8(publicKey),
+          });
+        }
+        await savePushSubscription({
+          sessionId: targetSession,
+          partyId: targetParty,
+          subscription: subscription.toJSON?.() ?? (subscription as any),
+        });
+        console.log('[QueueUp][push] saved subscription', {
+          endpoint: subscription.endpoint,
+          apiBase: API_BASE_URL,
+          sessionId: targetSession,
+          partyId: targetParty,
+        });
+        setPushReady(true);
+        setPushMessage('Notifications on');
+        if (!options?.silent) {
+          Alert.alert('Notifications enabled', 'We will alert you when it is your turn.');
+        }
+      } catch (e) {
+        console.warn('enablePush failed', e);
+        setPushMessage('Unable to enable notifications right now.');
+        if (!options?.silent) {
+          Alert.alert('Failed to enable push', 'Please try again in a moment.');
+        }
+      }
+    },
+    [partyId, sessionId]
+  );
+
   useEffect(() => {
     return () => {
       clearReconnect();
       closeActiveSocket();
     };
   }, [clearReconnect, closeActiveSocket]);
+
+  useEffect(() => {
+    if (!isWeb || !sessionId || !partyId || pushReady) {
+      return;
+    }
+    const key = `${sessionId}:${partyId}`;
+    if (autoPushAttemptRef.current === key) {
+      return;
+    }
+    autoPushAttemptRef.current = key;
+    enablePush({ sessionOverride: sessionId, partyOverride: partyId, silent: true }).catch(() => {
+      // Errors are surfaced through pushMessage state; no-op here to avoid unhandled rejections.
+    });
+  }, [isWeb, sessionId, partyId, pushReady, enablePush]);
 
   const connectionLabel = useMemo(() => {
     switch (connectionState) {
@@ -446,6 +567,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             <View style={styles.resultCard}>
               <Text style={styles.resultText}>{resultText}</Text>
               {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
+              {isWeb && inQueue && pushMessage ? (
+                <Text style={styles.resultHint}>{pushMessage}</Text>
+              ) : null}
             </View>
           ) : null}
         </ScrollView>
