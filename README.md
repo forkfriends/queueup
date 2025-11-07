@@ -60,4 +60,3 @@ See the complete setup guide: [docs/TURNSTILE-SETUP.md](docs/TURNSTILE-SETUP.md)
 - API contract: `docs/API.md`
 - Turnstile setup: `docs/TURNSTILE-SETUP.md`
 - Deploying the web front end: `.github/workflows/deploy-gh-pages.yml`
->>>>>>> main
