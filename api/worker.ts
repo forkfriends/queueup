@@ -15,6 +15,7 @@ export interface Env {
   HOST_AUTH_SECRET: string;
   VAPID_PUBLIC?: string;
   VAPID_PRIVATE?: string;
+  VAPID_SUBJECT?: string;
   ALLOWED_ORIGINS?: string;
   TURNSTILE_BYPASS?: string;
   TEST_MODE?: string;
@@ -215,9 +216,9 @@ async function sendPushNotification(
 
   if (params.kind && params.dedupe !== false) {
     const exists = await env.DB.prepare(
-      "SELECT 1 AS x FROM events WHERE session_id=?1 AND party_id=?2 AND type='push_sent' AND details LIKE ?3 LIMIT 1"
+      "SELECT 1 AS x FROM events WHERE session_id=?1 AND party_id=?2 AND type='push_sent' AND json_extract(details, '$.kind') = ?3 LIMIT 1"
     )
-      .bind(params.sessionId, params.partyId, `%\"kind\":\"${params.kind}\"%`)
+      .bind(params.sessionId, params.partyId, params.kind)
       .first<{ x: number }>();
     if (exists?.x) {
       return true;
@@ -236,7 +237,7 @@ async function sendPushNotification(
         expirationTime: null,
       },
       {
-        subject: 'mailto:team@queue-up.app',
+        subject: env.VAPID_SUBJECT ?? 'mailto:team@queue-up.app',
         publicKey: env.VAPID_PUBLIC,
         privateKey: env.VAPID_PRIVATE,
       }

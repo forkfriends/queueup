@@ -598,9 +598,12 @@ export class QueueDO implements DurableObject {
 
   private async triggerPositionPushes(): Promise<void> {
     if (!this.nowServing) return;
+    // Queue indices for position-based notifications when nowServing exists:
+    // - index 0 = position 2 (first in queue after the currently served guest)
+    // - index 3 = position 5 (fourth in queue after the currently served guest)
     const candidates: Array<[number, 'pos_2' | 'pos_5']> = [
-      [0, 'pos_2'],
-      [3, 'pos_5'],
+      [0, 'pos_2'],  // position 2
+      [3, 'pos_5'],  // position 5
     ];
     for (const [idx, kind] of candidates) {
       const party = this.queue[idx];
@@ -611,10 +614,16 @@ export class QueueDO implements DurableObject {
 
   private async sendPushSafe(partyId: string, kind: 'called' | 'pos_2' | 'pos_5'): Promise<void> {
     try {
+      // VAPID keys are required for push notifications
+      if (!this.env.VAPID_PUBLIC || !this.env.VAPID_PRIVATE) {
+        console.error('Missing VAPID_PUBLIC or VAPID_PRIVATE environment variable. Skipping push notification.');
+        return;
+      }
+
       const exists = await this.env.DB.prepare(
-        "SELECT 1 AS x FROM events WHERE session_id=?1 AND party_id=?2 AND type='push_sent' AND details LIKE ?3 LIMIT 1"
+        "SELECT 1 AS x FROM events WHERE session_id=?1 AND party_id=?2 AND type='push_sent' AND json_extract(details, '$.kind') = ?3 LIMIT 1"
       )
-        .bind(this.sessionId, partyId, `%\"kind\":\"${kind}\"%`)
+        .bind(this.sessionId, partyId, kind)
         .first<{ x: number }>();
       if (exists?.x) return;
 
@@ -642,9 +651,9 @@ export class QueueDO implements DurableObject {
         { data: JSON.stringify({ title, body }), options: { ttl: 60 } },
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth }, expirationTime: null },
         {
-          subject: 'mailto:team@queue-up.app',
-          publicKey: this.env.VAPID_PUBLIC ?? '',
-          privateKey: this.env.VAPID_PRIVATE ?? '',
+          subject: this.env.VAPID_SUBJECT ?? 'mailto:team@queue-up.app',
+          publicKey: this.env.VAPID_PUBLIC,
+          privateKey: this.env.VAPID_PRIVATE,
         }
       );
       const resp = await fetch(sub.endpoint, {
@@ -654,7 +663,9 @@ export class QueueDO implements DurableObject {
       });
       if (!resp.ok && (resp.status === 404 || resp.status === 410)) {
         try {
-          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE party_id=?1').bind(partyId).run();
+          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2')
+            .bind(this.sessionId, partyId)
+            .run();
         } catch {}
         return;
       }
@@ -668,7 +679,9 @@ export class QueueDO implements DurableObject {
       const status = e?.status ?? e?.code ?? 0;
       if (status === 404 || status === 410) {
         try {
-          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE party_id=?1').bind(partyId).run();
+          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2')
+            .bind(this.sessionId, partyId)
+            .run();
         } catch {}
       }
       // swallow to avoid breaking queue ops

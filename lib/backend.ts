@@ -68,7 +68,7 @@ export async function createQueue({ eventName, maxGuests, turnstileToken }: Crea
   const body = {
     eventName: trimmedEventName,
     maxGuests: normalizedMaxGuests,
-    turnstileToken: turnstileToken || undefined,
+    ...(turnstileToken && { turnstileToken }),
   };
   const response = await fetch(`${API_BASE_URL}/api/queue/create`, {
     method: 'POST',
@@ -103,7 +103,7 @@ export async function joinQueue({ code, name, size, turnstileToken }: JoinQueueP
   const payload = {
     name: name?.trim() || undefined,
     size: size && Number.isFinite(size) ? size : undefined,
-    turnstileToken: turnstileToken || undefined,
+    ...(turnstileToken && { turnstileToken }),
   };
 
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/join`, {
@@ -184,16 +184,27 @@ export async function getVapidPublicKey(): Promise<string | null> {
   }
 }
 
+// Minimal PushSubscription-like type to avoid DOM typing requirements in RN builds
+export interface PushSubscriptionParams {
+  endpoint: string;
+  keys?: {
+    p256dh?: string;
+    auth?: string;
+  };
+  expirationTime?: number | null;
+  options?: unknown;
+  [key: string]: unknown; // Allow extra fields for flexibility
+}
+
 export async function savePushSubscription(params: {
   sessionId: string;
   partyId: string;
-  // use any to avoid DOM typing requirements in RN builds
-  subscription: any;
+  subscription: PushSubscriptionParams;
 }): Promise<void> {
   const body = {
     sessionId: params.sessionId,
     partyId: params.partyId,
-    subscription: (params.subscription as any),
+    subscription: params.subscription,
   };
   const res = await fetch(`${API_BASE_URL}/api/push/subscribe`, {
     method: 'POST',
