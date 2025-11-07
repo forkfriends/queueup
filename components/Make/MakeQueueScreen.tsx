@@ -11,6 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
+import * as Location from 'expo-location';
 import DateTimePicker, {
   DateTimePickerAndroid,
   type DateTimePickerEvent,
@@ -26,6 +27,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 100;
 const DEFAULT_QUEUE_SIZE = 20;
+const DEFAULT_CALL_WINDOW_MINUTES = 2;
+const MIN_CALL_WINDOW_MINUTES = 1;
+const MAX_CALL_WINDOW_MINUTES = 10;
+const DEFAULT_GEOFENCE_RADIUS_METERS = 75;
 
 type TimeField = 'open' | 'close';
 
@@ -64,6 +69,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const [openTime, setOpenTime] = useState(() => createTime(9));
   const [closeTime, setCloseTime] = useState(() => createTime(17));
   const [contact, setContact] = useState('');
+  const [callWindowMinutes, setCallWindowMinutes] = useState<number>(DEFAULT_CALL_WINDOW_MINUTES);
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [capturingLocation, setCapturingLocation] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const applyTimeChange = useCallback(
@@ -100,7 +108,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
           mode: 'time',
           is24Hour: false,
           value: field === 'open' ? openTime : closeTime,
-          onChange: (event, selectedDate) => {
+          onChange: (event : any, selectedDate : any) => {
             if (event.type === 'set' && selectedDate) {
               applyTimeChange(field, selectedDate);
             }
@@ -126,6 +134,35 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const handleDismissPicker = useCallback(() => {
     setActivePicker(null);
   }, []);
+
+  const handleCaptureLocation = useCallback(async () => {
+    if (capturingLocation) {
+      return;
+    }
+    setCapturingLocation(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Share location',
+          'We need your current location to prevent guests from ghosting the queue.'
+        );
+        return;
+      }
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setCoords({
+        latitude: current.coords.latitude,
+        longitude: current.coords.longitude,
+      });
+    } catch (error) {
+      console.warn('Failed to capture location', error);
+      Alert.alert('Unable to fetch location', 'Turn on location services and try again.');
+    } finally {
+      setCapturingLocation(false);
+    }
+  }, [capturingLocation]);
 
   const adjustTimeByMinutes = useCallback(
     (field: TimeField, deltaMinutes: number) => {
@@ -191,12 +228,30 @@ export default function MakeQueueScreen({ navigation }: Props) {
       Alert.alert('Add event name', 'Please provide a name for this event.');
       return;
     }
+    if (!coords) {
+      Alert.alert('Lock location', 'Share your restaurant location before opening the queue.');
+      return;
+    }
     const normalizedMaxGuests = Math.min(MAX_QUEUE_SIZE, Math.max(MIN_QUEUE_SIZE, maxSize));
+    const callWindow = Math.min(
+      MAX_CALL_WINDOW_MINUTES,
+      Math.max(MIN_CALL_WINDOW_MINUTES, Math.round(callWindowMinutes))
+    );
+    const callTimeoutSeconds = callWindow * 60;
+    const locationLabel = location.trim();
+    const fallbackVenue = {
+      label: locationLabel || undefined,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      radiusMeters: DEFAULT_GEOFENCE_RADIUS_METERS,
+    };
     setLoading(true);
     try {
       const created = await createQueue({
         eventName: trimmedEventName,
         maxGuests: normalizedMaxGuests,
+        callTimeoutSeconds,
+        venue: fallbackVenue,
       });
       if (Platform.OS === 'web' && typeof window !== 'undefined' && created.hostAuthToken) {
         try {
@@ -216,6 +271,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
         hostAuthToken: created.hostAuthToken,
         eventName: created.eventName ?? trimmedEventName,
         maxGuests: created.maxGuests ?? normalizedMaxGuests,
+        callTimeoutSeconds: created.callTimeoutSeconds ?? callTimeoutSeconds,
+        venue: created.venue ?? fallbackVenue,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error creating queue';
@@ -253,6 +310,46 @@ export default function MakeQueueScreen({ navigation }: Props) {
               style={styles.input}
               returnKeyType="next"
             />
+            <Pressable
+              style={[
+                styles.locationButton,
+                capturingLocation ? styles.locationButtonDisabled : undefined,
+              ]}
+              onPress={handleCaptureLocation}
+              disabled={capturingLocation}
+              accessibilityRole="button">
+              {capturingLocation ? (
+                <ActivityIndicator color="#1f6feb" />
+              ) : (
+                <Text style={styles.locationButtonText}>Use Current Location</Text>
+              )}
+            </Pressable>
+            <Text style={coords ? styles.locationHelper : styles.locationHelperMuted}>
+              {coords
+                ? `Locked at ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`
+                : 'Guests must be near this spot to check in.'}
+            </Text>
+
+            <Text style={styles.label}>No-show Timer</Text>
+            <View style={styles.sliderRow}>
+              <Text style={styles.sliderHint}>Guests get</Text>
+              <Text style={styles.sliderValue}>{Math.round(callWindowMinutes)}</Text>
+              <Text style={styles.sliderHint}>min to confirm</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={MIN_CALL_WINDOW_MINUTES}
+              maximumValue={MAX_CALL_WINDOW_MINUTES}
+              step={1}
+              value={callWindowMinutes}
+              minimumTrackTintColor="#1f6feb"
+              maximumTrackTintColor="#d0d7de"
+              thumbTintColor="#1f6feb"
+              onValueChange={(value : any) => setCallWindowMinutes(Math.round(value))}
+            />
+            <Text style={styles.helperText}>
+              We'll auto-remove parties who stay silent longer than this window.
+            </Text>
 
             {/* Max Queue Size */}
             <Text style={styles.label}>Max Queue Size</Text>
@@ -270,7 +367,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
               minimumTrackTintColor="#1f6feb"
               maximumTrackTintColor="#d0d7de"
               thumbTintColor="#1f6feb"
-              onValueChange={(value) => setMaxSize(Math.round(value))}
+              onValueChange={(value : any) => setMaxSize(Math.round(value))}
             />
 
             {/* Open Hours */}

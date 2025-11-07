@@ -27,6 +27,12 @@ const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const MIN_QUEUE_CAPACITY = 1;
 const MAX_QUEUE_CAPACITY = 100;
+const DEFAULT_CALL_TIMEOUT_SECONDS = 120;
+const MIN_CALL_TIMEOUT_SECONDS = 30;
+const MAX_CALL_TIMEOUT_SECONDS = 600;
+const DEFAULT_VENUE_RADIUS_METERS = 75;
+const MIN_VENUE_RADIUS_METERS = 20;
+const MAX_VENUE_RADIUS_METERS = 500;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -138,15 +144,81 @@ async function handleCreate(
   }
 
   const eventName = rawEventName;
+  const rawCallTimeoutSeconds = (payload as any).callTimeoutSeconds;
+  let callTimeoutSeconds = DEFAULT_CALL_TIMEOUT_SECONDS;
+  if (rawCallTimeoutSeconds !== undefined) {
+    const parsed =
+      typeof rawCallTimeoutSeconds === 'number'
+        ? rawCallTimeoutSeconds
+        : typeof rawCallTimeoutSeconds === 'string' && rawCallTimeoutSeconds.trim().length > 0
+          ? Number.parseInt(rawCallTimeoutSeconds, 10)
+          : NaN;
+    if (Number.isFinite(parsed)) {
+      callTimeoutSeconds = Math.min(
+        MAX_CALL_TIMEOUT_SECONDS,
+        Math.max(MIN_CALL_TIMEOUT_SECONDS, Math.round(parsed))
+      );
+    }
+  }
+
+  const rawVenue = (payload as any).venue;
+  let venueLabel: string | null = null;
+  let venueLat: number | null = null;
+  let venueLng: number | null = null;
+  let venueRadius: number | null = null;
+  if (rawVenue !== undefined && rawVenue !== null) {
+    if (typeof rawVenue !== 'object') {
+      return jsonError('venue must be an object', 400);
+    }
+    const maybeLabel = (rawVenue as any).label;
+    if (typeof maybeLabel === 'string' && maybeLabel.trim().length > 0) {
+      venueLabel = maybeLabel.trim().slice(0, 200);
+    }
+    const parsedLat = Number((rawVenue as any).latitude);
+    const parsedLng = Number((rawVenue as any).longitude);
+    const parsedRadius = Number((rawVenue as any).radiusMeters ?? DEFAULT_VENUE_RADIUS_METERS);
+    if (
+      Number.isFinite(parsedLat) &&
+      parsedLat >= -90 &&
+      parsedLat <= 90 &&
+      Number.isFinite(parsedLng) &&
+      parsedLng >= -180 &&
+      parsedLng <= 180
+    ) {
+      venueLat = parsedLat;
+      venueLng = parsedLng;
+    } else {
+      return jsonError('venue must include valid latitude/longitude', 400);
+    }
+    if (Number.isFinite(parsedRadius) && parsedRadius > 0) {
+      venueRadius = Math.min(
+        MAX_VENUE_RADIUS_METERS,
+        Math.max(MIN_VENUE_RADIUS_METERS, Math.round(parsedRadius))
+      );
+    } else {
+      venueRadius = DEFAULT_VENUE_RADIUS_METERS;
+    }
+  }
+
   const id = env.QUEUE_DO.newUniqueId();
   const sessionId = id.toString();
 
   const shortCode = await generateUniqueCode(env);
 
   const insertResult = await env.DB.prepare(
-    "INSERT INTO sessions (id, short_code, status, event_name, max_guests) VALUES (?1, ?2, 'active', ?3, ?4)"
+    "INSERT INTO sessions (id, short_code, status, event_name, max_guests, call_timeout_seconds, venue_label, venue_lat, venue_lng, venue_radius_m) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
   )
-    .bind(sessionId, shortCode, eventName, maxGuests)
+    .bind(
+      sessionId,
+      shortCode,
+      eventName,
+      maxGuests,
+      callTimeoutSeconds,
+      venueLabel,
+      venueLat,
+      venueLng,
+      venueRadius
+    )
     .run();
 
   if (insertResult.error) {
@@ -169,6 +241,16 @@ async function handleCreate(
     buildSetCookie(hostCookieValue, HOST_COOKIE_MAX_AGE_SECONDS, corsOrigin ?? origin)
   );
 
+  const venue =
+    venueLat !== null && venueLng !== null
+      ? {
+          label: venueLabel ?? undefined,
+          latitude: venueLat,
+          longitude: venueLng,
+          radiusMeters: venueRadius ?? undefined,
+        }
+      : null;
+
   const body = JSON.stringify({
     code: shortCode,
     sessionId,
@@ -177,6 +259,8 @@ async function handleCreate(
     hostAuthToken: hostCookieValue,
     eventName,
     maxGuests,
+    callTimeoutSeconds,
+    venue,
   });
 
   return new Response(body, { status: 200, headers });

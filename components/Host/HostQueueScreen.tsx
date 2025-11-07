@@ -27,12 +27,20 @@ import {
   HostParty,
   buildHostConnectUrl,
 } from '../../lib/backend';
+import type { QueueVenue } from '../../lib/backend';
 import { Copy } from 'lucide-react-native';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
 type HostMessage =
-  | { type: 'queue_update'; queue?: HostParty[]; nowServing?: HostParty | null; maxGuests?: number }
+  | {
+      type: 'queue_update';
+      queue?: HostParty[];
+      nowServing?: HostParty | null;
+      maxGuests?: number;
+      callTimeoutSeconds?: number;
+      venue?: QueueVenue | null;
+    }
   | Record<string, unknown>;
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -78,6 +86,10 @@ export default function HostQueueScreen({ route }: Props) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [queue, setQueue] = useState<HostParty[]>([]);
   const [nowServing, setNowServing] = useState<HostParty | null>(null);
+  const [callWindowSeconds, setCallWindowSeconds] = useState<number>(
+    typeof route.params.callTimeoutSeconds === 'number' ? route.params.callTimeoutSeconds : 120
+  );
+  const [venue, setVenue] = useState<QueueVenue | null>(route.params.venue ?? null);
   const [closed, setClosed] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
@@ -140,6 +152,12 @@ export default function HostQueueScreen({ route }: Props) {
         setNowServing(serving);
         if (typeof parsed.maxGuests === 'number') {
           setCapacity(parsed.maxGuests);
+        }
+        if (typeof parsed.callTimeoutSeconds === 'number') {
+          setCallWindowSeconds(parsed.callTimeoutSeconds);
+        }
+        if ('venue' in parsed) {
+          setVenue((parsed.venue ?? null) as QueueVenue | null);
         }
         if (queueEntries.length > 0 || serving) {
           setClosed(false);
@@ -223,6 +241,21 @@ export default function HostQueueScreen({ route }: Props) {
         ? 'Connecting…'
         : 'Disconnected';
   const shareableLink = joinUrl ?? null;
+  const callWindowMinutes = Math.max(1, Math.round(callWindowSeconds / 60));
+  const venueDescription = useMemo(() => {
+    if (!venue) {
+      return null;
+    }
+    if (venue.label && venue.label.trim().length > 0) {
+      return venue.label.trim();
+    }
+    const lat = Number.isFinite(venue.latitude) ? venue.latitude.toFixed(4) : null;
+    const lng = Number.isFinite(venue.longitude) ? venue.longitude.toFixed(4) : null;
+    if (lat && lng) {
+      return `${lat}, ${lng}`;
+    }
+    return null;
+  }, [venue]);
 
   const disabledAdvance =
     !hasHostAuth || actionLoading || closeLoading || closed || (queueCount === 0 && !nowServing);
@@ -595,6 +628,14 @@ export default function HostQueueScreen({ route }: Props) {
         {typeof capacity === 'number' ? (
           <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
         ) : null}
+        {venueDescription ? (
+          <Text style={styles.headerLine} numberOfLines={2} ellipsizeMode="tail">
+            Location lock: {venueDescription}
+          </Text>
+        ) : null}
+        <Text style={styles.headerLine}>
+          Auto-remove after {callWindowMinutes} min with no check-in.
+        </Text>
         <View style={styles.headerCodeRow}>
           <Text style={styles.headerLine}>Queue code:</Text>
           <Text style={styles.headerCodeValue}>{code}</Text>

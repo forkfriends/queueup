@@ -15,6 +15,13 @@ interface QueueUpdateMessage {
     status: string;
   };
   maxGuests?: number;
+  callTimeoutSeconds?: number;
+  venue?: {
+    label?: string | null;
+    latitude: number;
+    longitude: number;
+    radiusMeters?: number | null;
+  } | null;
 }
 
 interface PositionMessage {
@@ -25,9 +32,18 @@ interface PositionMessage {
 
 type GuestMessage =
   | PositionMessage
-  | { type: 'called' }
+  | { type: 'called'; expiresAt?: number | null }
   | { type: 'removed'; reason: string }
-  | { type: 'closed' };
+  | { type: 'closed' }
+  | {
+      type: 'queue_snapshot';
+      queue: { id: string; status: string }[];
+      nowServing: { id: string; status: string } | null;
+      callTimeoutSeconds?: number;
+      callDeadline?: number | null;
+    };
+
+type NonSnapshotGuestMessage = Exclude<GuestMessage, { type: 'queue_snapshot' }>;
 
 async function connectWebSocket(
   path: string,
@@ -82,14 +98,38 @@ async function fetchJson(path: string, init: RequestInit = {}): Promise<Response
   return SELF.fetch(url, init);
 }
 
+async function waitForGuestSignal(
+  ws: Awaited<ReturnType<typeof connectWebSocket>>
+): Promise<NonSnapshotGuestMessage> {
+  while (true) {
+    const message = await ws.waitForMessage<GuestMessage>();
+    if (message.type === 'queue_snapshot') {
+      continue;
+    }
+    return message;
+  }
+}
+
 describe('queue lifecycle integration', () => {
   it('supports create, join, real-time updates, alarms, and close flows', async () => {
     const desiredEventName = 'Integration Test Event';
     const desiredMaxGuests = 2;
+    const desiredCallTimeoutSeconds = 150;
+    const desiredVenue = {
+      label: 'Integration Test Restaurant',
+      latitude: 37.33182,
+      longitude: -122.03118,
+      radiusMeters: 80,
+    };
     const createResponse = await fetchJson('/api/queue/create', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ eventName: desiredEventName, maxGuests: desiredMaxGuests }),
+      body: JSON.stringify({
+        eventName: desiredEventName,
+        maxGuests: desiredMaxGuests,
+        callTimeoutSeconds: desiredCallTimeoutSeconds,
+        venue: desiredVenue,
+      }),
     });
     expect(createResponse.status).toBe(200);
     const createBody = await createResponse.json<{
@@ -99,11 +139,23 @@ describe('queue lifecycle integration', () => {
       wsUrl: string;
       eventName: string;
       maxGuests: number;
+      callTimeoutSeconds: number;
+      venue: {
+        label?: string | null;
+        latitude: number;
+        longitude: number;
+        radiusMeters?: number | null;
+      } | null;
     }>();
     expect(createBody.code).toMatch(/^[A-Z0-9]{6}$/);
     expect(createBody.sessionId).toBeTruthy();
     expect(createBody.eventName).toBe(desiredEventName);
     expect(createBody.maxGuests).toBe(desiredMaxGuests);
+    expect(createBody.callTimeoutSeconds).toBe(desiredCallTimeoutSeconds);
+    expect(createBody.venue).toMatchObject({
+      latitude: desiredVenue.latitude,
+      longitude: desiredVenue.longitude,
+    });
     const sessionId = createBody.sessionId;
     const shortCode = createBody.code;
 
@@ -119,7 +171,12 @@ describe('queue lifecycle integration', () => {
     const hostInitial = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostInitial.type).toBe('queue_update');
     expect(hostInitial.queue.length).toBe(0);
-  expect(hostInitial.maxGuests).toBe(desiredMaxGuests);
+    expect(hostInitial.maxGuests).toBe(desiredMaxGuests);
+    expect(hostInitial.callTimeoutSeconds).toBe(desiredCallTimeoutSeconds);
+    expect(hostInitial.venue).toMatchObject({
+      latitude: desiredVenue.latitude,
+      longitude: desiredVenue.longitude,
+    });
 
     // Guest joins queue.
     const joinResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
@@ -128,8 +185,21 @@ describe('queue lifecycle integration', () => {
       body: JSON.stringify({ name: 'Alice', size: 2, turnstileToken: 'stub-token' }),
     });
     expect(joinResponse.status).toBe(200);
-    const joinBody = await joinResponse.json<{ partyId: string; position: number }>();
+    const joinBody = await joinResponse.json<{
+      partyId: string;
+      position: number;
+      callTimeoutSeconds: number;
+      venue: {
+        latitude: number;
+        longitude: number;
+      } | null;
+    }>();
     expect(joinBody.position).toBe(1);
+    expect(joinBody.callTimeoutSeconds).toBe(desiredCallTimeoutSeconds);
+    expect(joinBody.venue).toMatchObject({
+      latitude: desiredVenue.latitude,
+      longitude: desiredVenue.longitude,
+    });
     const partyId = joinBody.partyId;
 
     const hostAfterJoin = await hostWs.waitForMessage<QueueUpdateMessage>();
@@ -137,6 +207,7 @@ describe('queue lifecycle integration', () => {
     expect(hostAfterJoin.queue[0].id).toBe(partyId);
     expect(hostAfterJoin.queue[0].status).toBe('waiting');
     expect(hostAfterJoin.maxGuests).toBe(desiredMaxGuests);
+    expect(hostAfterJoin.callTimeoutSeconds).toBe(desiredCallTimeoutSeconds);
 
     // Additional guest should not be able to join while capacity is full.
     const overCapacityResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
@@ -149,7 +220,7 @@ describe('queue lifecycle integration', () => {
     // Guest websocket connection receives position updates.
     const guestWs = await connectWebSocket(`/api/queue/${shortCode}/connect?partyId=${partyId}`);
 
-    const guestInitial = await guestWs.waitForMessage<GuestMessage>();
+    const guestInitial = await waitForGuestSignal(guestWs);
     expect(guestInitial.type).toBe('position');
     if (guestInitial.type === 'position') {
       expect(guestInitial.position).toBe(1);
@@ -164,7 +235,7 @@ describe('queue lifecycle integration', () => {
     expect(nearbyResponse.status).toBe(200);
     const hostAfterNearby = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterNearby.queue[0].nearby).toBe(true);
-  expect(hostAfterNearby.maxGuests).toBe(desiredMaxGuests);
+    expect(hostAfterNearby.maxGuests).toBe(desiredMaxGuests);
 
     // Host advances queue.
     const advanceResponse = await fetchJson(`/api/queue/${shortCode}/advance`, {
@@ -181,9 +252,9 @@ describe('queue lifecycle integration', () => {
 
     const hostAfterAdvance = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterAdvance.nowServing?.id).toBe(partyId);
-  expect(hostAfterAdvance.maxGuests).toBe(desiredMaxGuests);
+    expect(hostAfterAdvance.maxGuests).toBe(desiredMaxGuests);
 
-    const guestCalled = await guestWs.waitForMessage<GuestMessage>();
+    const guestCalled = await waitForGuestSignal(guestWs);
     expect(guestCalled.type).toBe('called');
 
     // Alarm should mark the party as no_show and auto-advance.
@@ -194,9 +265,9 @@ describe('queue lifecycle integration', () => {
 
     const hostAfterAlarm = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterAlarm.nowServing).toBeNull();
-  expect(hostAfterAlarm.maxGuests).toBe(desiredMaxGuests);
+    expect(hostAfterAlarm.maxGuests).toBe(desiredMaxGuests);
 
-    const guestRemoved = await guestWs.waitForMessage<GuestMessage>();
+    const guestRemoved = await waitForGuestSignal(guestWs);
     expect(guestRemoved).toEqual({ type: 'removed', reason: 'no_show' });
 
     // Join a second party to exercise kick + leave flows.

@@ -19,11 +19,22 @@ export interface CreateQueueResult {
   hostAuthToken?: string;
   eventName?: string;
   maxGuests: number;
+  callTimeoutSeconds: number;
+  venue: QueueVenue | null;
 }
 
 export interface CreateQueueParams {
   eventName: string;
   maxGuests: number;
+  callTimeoutSeconds: number;
+  venue: QueueVenue;
+}
+
+export interface QueueVenue {
+  label?: string | null;
+  latitude: number;
+  longitude: number;
+  radiusMeters?: number | null;
 }
 
 export const HOST_COOKIE_NAME = 'queue_host_auth';
@@ -59,7 +70,12 @@ function extractHostToken(setCookieHeader: string | null): string | undefined {
 const MIN_QUEUE_CAPACITY = 1;
 const MAX_QUEUE_CAPACITY = 100;
 
-export async function createQueue({ eventName, maxGuests }: CreateQueueParams): Promise<CreateQueueResult> {
+export async function createQueue({
+  eventName,
+  maxGuests,
+  callTimeoutSeconds,
+  venue,
+}: CreateQueueParams): Promise<CreateQueueResult> {
   const trimmedEventName = eventName.trim();
   const normalizedMaxGuests = Number.isFinite(maxGuests)
     ? Math.min(MAX_QUEUE_CAPACITY, Math.max(MIN_QUEUE_CAPACITY, Math.round(maxGuests)))
@@ -67,6 +83,8 @@ export async function createQueue({ eventName, maxGuests }: CreateQueueParams): 
   const body = {
     eventName: trimmedEventName,
     maxGuests: normalizedMaxGuests,
+    callTimeoutSeconds,
+    venue,
   };
   const response = await fetch(`${API_BASE_URL}/api/queue/create`, {
     method: 'POST',
@@ -93,6 +111,8 @@ export interface JoinQueueParams {
 export interface JoinQueueResult {
   partyId: string;
   position: number;
+  callTimeoutSeconds: number;
+  venue: QueueVenue | null;
 }
 
 export async function joinQueue({ code, name, size }: JoinQueueParams): Promise<JoinQueueResult> {
@@ -112,6 +132,22 @@ export async function joinQueue({ code, name, size }: JoinQueueParams): Promise<
   }
 
   return (await response.json()) as JoinQueueResult;
+}
+
+export interface DeclareNearbyParams {
+  code: string;
+  partyId: string;
+}
+
+export async function declareNearby({ code, partyId }: DeclareNearbyParams): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/declare-nearby`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ partyId }),
+  });
+  if (!response.ok) {
+    throw await buildError(response);
+  }
 }
 
 export interface LeaveQueueParams {

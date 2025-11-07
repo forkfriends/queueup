@@ -1,3 +1,5 @@
+import type { QueueVenue } from '../lib/backend';
+
 export type RootStackParamList = {
   HomeScreen: undefined;
   MakeQueueScreen: { id: string } | undefined;
@@ -10,5 +12,7 @@ export type RootStackParamList = {
     hostAuthToken?: string;
     eventName?: string;
     maxGuests?: number;
+    callTimeoutSeconds?: number;
+    venue?: QueueVenue | null;
   };
 };

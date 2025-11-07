@@ -12,7 +12,29 @@
       "tsconfigPaths": true,
       "baseUrl": "/queueup"
     },
-    "plugins": [],
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow ForkFriends to confirm you're near the restaurant so hosts can seat you.",
+          "locationAlwaysAndWhenInUsePermission": "Allow ForkFriends to confirm you're near the restaurant so hosts can seat you.",
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow ForkFriends to use the camera so you can scan QR codes quickly.",
+          "microphonePermission": "Allow ForkFriends to access the microphone when recording video."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow ForkFriends to save QR codes to your photo library."
+        }
+      ]
+    ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

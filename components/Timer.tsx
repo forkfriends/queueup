@@ -1,12 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Button } from 'react-native';
+import { View, Text, TextInput, Button, Alert } from 'react-native';
 
-export default function Timer() {
+interface TimerProps {
+  initialSeconds?: number | null;
+  autoStart?: boolean;
+  showInputs?: boolean;
+  onComplete?: () => void;
+}
+
+export default function Timer({
+  initialSeconds = null,
+  autoStart = true,
+  showInputs = true,
+  onComplete,
+}: TimerProps) {
   const [hours, setHours] = useState('');
   const [minutes, setMinutes] = useState('');
   const [seconds, setSeconds] = useState('');
   const [remaining, setRemaining] = useState(0);
   const [running, setRunning] = useState(false);
+  const controlled = typeof initialSeconds === 'number' && initialSeconds >= 0;
+  const shouldShowInputs = showInputs && !controlled;
 
   // Convert user input into total seconds and start countdown
   const startTimer = () => {
@@ -20,26 +34,38 @@ export default function Timer() {
     }
   };
 
+  useEffect(() => {
+    if (!controlled) {
+      return;
+    }
+    setRemaining(initialSeconds ?? 0);
+    setRunning(autoStart);
+  }, [controlled, initialSeconds, autoStart]);
+
   // Timer countdown effect
   useEffect(() => {
     if (!running) return;
     if (remaining <= 0) {
       setRunning(false);
-      alert('Time is up!');
+      if (!controlled) {
+        Alert.alert('Time is up!', 'Timer finished.');
+      }
+      onComplete?.();
       return;
     }
-    const interval = setInterval(() => setRemaining(r => r - 1), 1000);
+    const interval = setInterval(() => setRemaining((r) => Math.max(0, r - 1)), 1000);
     return () => clearInterval(interval);
-  }, [running, remaining]);
+  }, [running, remaining, controlled, onComplete]);
 
   // Convert remaining seconds → H:M:S format
   const h = Math.floor(remaining / 3600);
   const m = Math.floor((remaining % 3600) / 60);
   const s = remaining % 60;
+  const showCountdownText = running || controlled;
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-      {!running ? (
+    <View style={{ justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+      {!running && shouldShowInputs ? (
         <>
           <TextInput
             placeholder="Hours"
@@ -64,13 +90,14 @@ export default function Timer() {
           />
           <Button title="Start Timer" onPress={startTimer} />
         </>
-      ) : (
+      ) : null}
+      {showCountdownText ? (
         <Text style={{ fontSize: 40, fontWeight: 'bold' }}>
           {`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s
             .toString()
             .padStart(2, '0')}`}
         </Text>
-      )}
+      ) : null}
     </View>
   );
 }

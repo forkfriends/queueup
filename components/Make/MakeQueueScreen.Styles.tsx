@@ -54,6 +54,38 @@ const styles = StyleSheet.create({
   slider: {
     marginHorizontal: 4,
   },
+  helperText: {
+    fontSize: 13,
+    color: '#555',
+    marginTop: 6,
+  },
+  locationButton: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#1f6feb',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationButtonDisabled: {
+    opacity: 0.6,
+  },
+  locationButtonText: {
+    color: '#1f6feb',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  locationHelper: {
+    fontSize: 13,
+    color: '#333',
+    marginTop: 6,
+  },
+  locationHelperMuted: {
+    fontSize: 13,
+    color: '#888',
+    marginTop: 6,
+  },
   textArea: {
     height: 100,
   },

@@ -13,18 +13,34 @@ interface QueueParty {
   joinedAt: number;
 }
 
+type GuestQueueEntry = Pick<QueueParty, 'id' | 'name' | 'size' | 'status'>;
+
+interface VenueLocation {
+  label?: string | null;
+  latitude: number;
+  longitude: number;
+  radiusMeters?: number | null;
+}
+
 interface StoredState {
   queue: QueueParty[];
   nowServing: QueueParty | null;
   closed?: boolean;
   pendingPartyId?: string | null;
   maxGuests?: number;
+  callTimeoutSeconds?: number;
+  venue?: VenueLocation | null;
+  callDeadline?: number | null;
 }
 
 type ConnectionInfo = { role: 'host' } | { role: 'guest'; partyId: string };
 
-const CALL_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_MAX_GUESTS = 100;
+const DEFAULT_CALL_TIMEOUT_SECONDS = 120;
+const MIN_CALL_TIMEOUT_SECONDS = 30;
+const MAX_CALL_TIMEOUT_SECONDS = 600;
+const MIN_VENUE_RADIUS_METERS = 20;
+const MAX_VENUE_RADIUS_METERS = 500;
 
 function logPrefix(sessionId: string, scope: string): string {
   return `[QueueDO ${sessionId}] ${scope}:`;
@@ -37,6 +53,9 @@ export class QueueDO implements DurableObject {
   private pendingPartyId: string | null = null;
   private closed = false;
   private maxGuests = DEFAULT_MAX_GUESTS;
+  private callTimeoutSeconds = DEFAULT_CALL_TIMEOUT_SECONDS;
+  private venue: VenueLocation | null = null;
+  private callDeadline: number | null = null;
 
   private sockets = new Map<WebSocket, ConnectionInfo>();
   private guestSockets = new Map<string, Set<WebSocket>>();
@@ -154,7 +173,12 @@ export class QueueDO implements DurableObject {
     const aheadCount = aheadWaiting + (this.nowServing ? 1 : 0);
     const position = aheadCount + 1;
 
-    return this.jsonResponse({ partyId: party.id, position });
+    return this.jsonResponse({
+      partyId: party.id,
+      position,
+      callTimeoutSeconds: this.callTimeoutSeconds,
+      venue: this.toVenuePayload(),
+    });
   }
 
   private async handleDeclareNearby(request: Request): Promise<Response> {
@@ -270,6 +294,7 @@ export class QueueDO implements DurableObject {
     this.queue = [];
     this.nowServing = null;
     this.pendingPartyId = null;
+    this.callDeadline = null;
 
     await this.env.DB.batch([
       this.env.DB.prepare("UPDATE sessions SET status = 'closed' WHERE id = ?1").bind(
@@ -443,6 +468,7 @@ export class QueueDO implements DurableObject {
       this.notifyGuestRemoval(servedPartyId, 'served');
       this.nowServing = null;
       this.pendingPartyId = null;
+      this.callDeadline = null;
       await this.state.storage.deleteAlarm();
     }
 
@@ -471,13 +497,14 @@ export class QueueDO implements DurableObject {
         ).bind(this.sessionId, selectedParty.id, JSON.stringify({ action: 'called' })),
       ]);
 
-      await this.state.storage.setAlarm(Date.now() + CALL_TIMEOUT_MS);
+      await this.scheduleCallTimeout();
       await this.persistState();
 
       this.notifyGuestCalled(selectedParty.id);
     } else {
       this.nowServing = null;
       this.pendingPartyId = null;
+      this.callDeadline = null;
       await this.state.storage.deleteAlarm();
       await this.persistState();
     }
@@ -486,6 +513,14 @@ export class QueueDO implements DurableObject {
     this.broadcastGuestPositions();
 
     return { nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null };
+  }
+
+  private async scheduleCallTimeout(): Promise<void> {
+    const normalized = this.normalizeCallTimeout(this.callTimeoutSeconds);
+    this.callTimeoutSeconds = normalized;
+    const deadline = Date.now() + normalized * 1000;
+    this.callDeadline = deadline;
+    await this.state.storage.setAlarm(deadline);
   }
 
   private async callNextParty(): Promise<void> {
@@ -510,6 +545,7 @@ export class QueueDO implements DurableObject {
     this.notifyGuestRemoval(partyId, 'no_show');
     this.nowServing = null;
     this.pendingPartyId = null;
+    this.callDeadline = null;
     await this.persistState();
   }
 
@@ -517,6 +553,7 @@ export class QueueDO implements DurableObject {
     if (this.nowServing && this.nowServing.id === partyId) {
       this.nowServing = null;
       this.pendingPartyId = null;
+      this.callDeadline = null;
       await this.state.storage.deleteAlarm();
     } else {
       const index = this.queue.findIndex((entry) => entry.id === partyId);
@@ -556,6 +593,9 @@ export class QueueDO implements DurableObject {
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
       maxGuests: this.maxGuests,
+      callTimeoutSeconds: this.callTimeoutSeconds,
+      venue: this.toVenuePayload(),
+      callDeadline: this.callDeadline,
     });
 
     for (const [socket, info] of this.sockets.entries()) {
@@ -580,12 +620,46 @@ export class QueueDO implements DurableObject {
         this.safeSend(socket, message);
       }
     }
+    this.broadcastGuestQueueSnapshot();
+  }
+
+  private broadcastGuestQueueSnapshot(): void {
+    if (this.guestSockets.size === 0) {
+      return;
+    }
+    const snapshot = JSON.stringify(this.buildGuestSnapshot());
+    for (const sockets of this.guestSockets.values()) {
+      for (const socket of sockets) {
+        this.safeSend(socket, snapshot);
+      }
+    }
+  }
+
+  private sendGuestSnapshot(socket: WebSocket): void {
+    const snapshot = JSON.stringify(this.buildGuestSnapshot());
+    this.safeSend(socket, snapshot);
+  }
+
+  private buildGuestSnapshot(): {
+    type: 'queue_snapshot';
+    queue: GuestQueueEntry[];
+    nowServing: GuestQueueEntry | null;
+    callTimeoutSeconds: number;
+    callDeadline: number | null;
+  } {
+    return {
+      type: 'queue_snapshot',
+      queue: this.queue.map((entry) => this.toGuestQueueEntry(entry)),
+      nowServing: this.nowServing ? this.toGuestQueueEntry(this.nowServing) : null,
+      callTimeoutSeconds: this.callTimeoutSeconds,
+      callDeadline: this.callDeadline,
+    };
   }
 
   private notifyGuestCalled(partyId: string): void {
     const sockets = this.guestSockets.get(partyId);
     if (!sockets) return;
-    const message = JSON.stringify({ type: 'called' });
+    const message = JSON.stringify({ type: 'called', expiresAt: this.callDeadline });
     for (const socket of sockets) {
       this.safeSend(socket, message);
     }
@@ -626,6 +700,9 @@ export class QueueDO implements DurableObject {
       queue: this.queue.map((entry) => this.toHostParty(entry)),
       nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
       maxGuests: this.maxGuests,
+      callTimeoutSeconds: this.callTimeoutSeconds,
+      venue: this.toVenuePayload(),
+      callDeadline: this.callDeadline,
     });
     this.safeSend(socket, message);
   }
@@ -638,7 +715,11 @@ export class QueueDO implements DurableObject {
     }
 
     if (this.nowServing && this.nowServing.id === partyId) {
-      this.safeSend(socket, JSON.stringify({ type: 'called' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: 'called', expiresAt: this.callDeadline })
+      );
+      this.sendGuestSnapshot(socket);
       return;
     }
 
@@ -650,6 +731,7 @@ export class QueueDO implements DurableObject {
 
     const { position, aheadCount } = this.computePosition(partyId);
     this.safeSend(socket, JSON.stringify({ type: 'position', position, aheadCount }));
+    this.sendGuestSnapshot(socket);
   }
 
   private computePosition(partyId: string): { position: number; aheadCount: number } {
@@ -687,6 +769,27 @@ export class QueueDO implements DurableObject {
     };
   }
 
+  private toGuestQueueEntry(party: QueueParty): GuestQueueEntry {
+    return {
+      id: party.id,
+      name: party.name,
+      size: party.size,
+      status: party.status,
+    };
+  }
+
+  private toVenuePayload(): VenueLocation | null {
+    if (!this.venue) {
+      return null;
+    }
+    return {
+      label: this.venue.label ?? null,
+      latitude: this.venue.latitude,
+      longitude: this.venue.longitude,
+      radiusMeters: this.venue.radiusMeters ?? null,
+    };
+  }
+
   private findParty(partyId: string): QueueParty | undefined {
     if (this.nowServing && this.nowServing.id === partyId) {
       return this.nowServing;
@@ -708,6 +811,9 @@ export class QueueDO implements DurableObject {
       this.closed = stored.closed ?? false;
       this.pendingPartyId = stored.pendingPartyId ?? (this.nowServing ? this.nowServing.id : null);
       this.maxGuests = stored.maxGuests ?? DEFAULT_MAX_GUESTS;
+      this.callTimeoutSeconds = this.normalizeCallTimeout(stored.callTimeoutSeconds);
+      this.venue = stored.venue ? { ...stored.venue } : null;
+      this.callDeadline = typeof stored.callDeadline === 'number' ? stored.callDeadline : null;
       return;
     }
 
@@ -717,10 +823,18 @@ export class QueueDO implements DurableObject {
 
   private async loadFromDatabase(): Promise<void> {
     const sessionRow = await this.env.DB.prepare(
-      'SELECT status, max_guests FROM sessions WHERE id = ?1'
+      'SELECT status, max_guests, call_timeout_seconds, venue_label, venue_lat, venue_lng, venue_radius_m FROM sessions WHERE id = ?1'
     )
       .bind(this.sessionId)
-      .first<{ status: string; max_guests?: number | null }>();
+      .first<{
+        status: string;
+        max_guests?: number | null;
+        call_timeout_seconds?: number | null;
+        venue_label?: string | null;
+        venue_lat?: number | null;
+        venue_lng?: number | null;
+        venue_radius_m?: number | null;
+      }>();
 
     this.closed = sessionRow?.status === 'closed';
     if (typeof sessionRow?.max_guests === 'number' && Number.isFinite(sessionRow.max_guests)) {
@@ -728,6 +842,40 @@ export class QueueDO implements DurableObject {
     } else {
       this.maxGuests = DEFAULT_MAX_GUESTS;
     }
+    this.callTimeoutSeconds = this.normalizeCallTimeout(sessionRow?.call_timeout_seconds);
+    const venueLat =
+      typeof sessionRow?.venue_lat === 'number' && Number.isFinite(sessionRow.venue_lat)
+        ? sessionRow.venue_lat
+        : null;
+    const venueLng =
+      typeof sessionRow?.venue_lng === 'number' && Number.isFinite(sessionRow.venue_lng)
+        ? sessionRow.venue_lng
+        : null;
+    if (
+      venueLat !== null &&
+      venueLng !== null &&
+      venueLat >= -90 &&
+      venueLat <= 90 &&
+      venueLng >= -180 &&
+      venueLng <= 180
+    ) {
+      const venueRadius =
+        typeof sessionRow?.venue_radius_m === 'number' && Number.isFinite(sessionRow.venue_radius_m)
+          ? Math.min(
+              MAX_VENUE_RADIUS_METERS,
+              Math.max(MIN_VENUE_RADIUS_METERS, Math.round(sessionRow.venue_radius_m))
+            )
+          : null;
+      this.venue = {
+        label: sessionRow?.venue_label ?? null,
+        latitude: venueLat,
+        longitude: venueLng,
+        radiusMeters: venueRadius,
+      };
+    } else {
+      this.venue = null;
+    }
+    this.callDeadline = null;
 
     const { results } = await this.env.DB.prepare(
       "SELECT id, name, size, joined_at, status, nearby FROM parties WHERE session_id = ?1 AND status IN ('waiting','called') ORDER BY joined_at ASC"
@@ -775,7 +923,17 @@ export class QueueDO implements DurableObject {
       closed: this.closed,
       pendingPartyId: this.pendingPartyId,
       maxGuests: this.maxGuests,
+      callTimeoutSeconds: this.callTimeoutSeconds,
+      venue: this.venue ? { ...this.venue } : null,
+      callDeadline: this.callDeadline,
     });
+  }
+
+  private normalizeCallTimeout(value?: number | null): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return DEFAULT_CALL_TIMEOUT_SECONDS;
+    }
+    return Math.min(MAX_CALL_TIMEOUT_SECONDS, Math.max(MIN_CALL_TIMEOUT_SECONDS, Math.round(value)));
   }
 
   private async readJson(request: Request): Promise<any | undefined> {
