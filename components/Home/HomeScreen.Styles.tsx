@@ -8,6 +8,24 @@ export default StyleSheet.create({
     paddingTop: 16,
     alignItems: 'center',
   },
+  returnButton: {
+    marginTop: 20,
+    width: '100%',
+    backgroundColor: '#2ea44f', // Different color to distinguish it
+    padding: 16,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  returnButtonSpacing: {
+    marginTop: 10, // Less spacing between multiple return buttons
+  },
   title: {
     marginTop: 24,
     marginBottom: 24,

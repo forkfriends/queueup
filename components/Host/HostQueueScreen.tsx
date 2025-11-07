@@ -28,6 +28,7 @@ import {
   buildHostConnectUrl,
 } from '../../lib/backend';
 import { Copy } from 'lucide-react-native';
+import { storage } from '../../utils/storage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
@@ -94,14 +95,25 @@ export default function HostQueueScreen({ route }: Props) {
       return;
     }
     setHostToken(initialHostAuthToken);
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    // Persist host auth and queue info for cross-platform return-to-queue buttons
+    (async () => {
       try {
-        window.sessionStorage.setItem(storageKey, initialHostAuthToken);
+        await storage.setHostAuth(sessionId, initialHostAuthToken);
+        await storage.setActiveQueue({
+          code,
+          sessionId,
+          wsUrl,
+          hostAuthToken: initialHostAuthToken,
+          joinUrl,
+          eventName,
+          maxGuests: initialMaxGuests,
+          createdAt: Date.now(),
+        });
       } catch {
-        // Ignore storage errors in restricted environments
+        // Ignore storage errors (e.g. private mode)
       }
-    }
-  }, [initialHostAuthToken, storageKey]);
+    })();
+  }, [initialHostAuthToken, storageKey, code, sessionId, wsUrl, joinUrl, eventName, initialMaxGuests]);
 
   const webSocketUrl = useMemo(() => buildHostConnectUrl(wsUrl, hostToken), [wsUrl, hostToken]);
   const hasHostAuth = Boolean(hostToken);
@@ -502,6 +514,18 @@ export default function HostQueueScreen({ route }: Props) {
       setQueue([]);
       setNowServing(null);
       setConnectionError(null);
+      try {
+        // Remove this queue from persistent storage so HomeScreen won't show it anymore
+        await storage.removeQueue(code);
+      } catch (err) {
+        console.warn('Failed to remove queue from storage after close', err);
+      }
+      try {
+        // Also remove stored host auth for this session
+        await storage.removeHostAuth(sessionId);
+      } catch (err) {
+        console.warn('Failed to remove host auth from storage after close', err);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to close queue';
       Alert.alert('Unable to close queue', message);
