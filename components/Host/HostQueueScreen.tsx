@@ -45,6 +45,7 @@ type HostMessage =
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
 
+const POLL_INTERVAL_MS = 10000; // Poll every 10 seconds
 const RECONNECT_DELAY_MS = 3000;
 
 type QRCodeRef = {
@@ -95,9 +96,10 @@ export default function HostQueueScreen({ route }: Props) {
   const isWeb = Platform.OS === 'web';
   const [savingQr, setSavingQr] = useState(false);
 
-  const socketRef = useRef<WebSocket | null>(null);
+  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrCodeRef = useRef<QRCodeRef | null>(null);
+  const etag = useRef<string | null>(null);
 
   useEffect(() => {
     if (!initialHostAuthToken) {
@@ -124,7 +126,10 @@ export default function HostQueueScreen({ route }: Props) {
     })();
   }, [initialHostAuthToken, storageKey, code, sessionId, wsUrl, joinUrl, eventName, initialMaxGuests]);
 
-  const webSocketUrl = useMemo(() => buildHostConnectUrl(wsUrl, hostToken), [wsUrl, hostToken]);
+  const snapshotUrl = useMemo(() => {
+    const baseUrl = wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    return baseUrl;
+  }, [wsUrl]);
   const hasHostAuth = Boolean(hostToken);
   const [mediaPermission, requestMediaPermission, getMediaPermission] = MediaLibrary.usePermissions(
     Platform.OS === 'android' ? { writeOnly: true } : undefined
@@ -137,39 +142,31 @@ export default function HostQueueScreen({ route }: Props) {
     }
   }, []);
 
-  const closeSocket = useCallback(() => {
-    if (socketRef.current) {
-      try {
-        socketRef.current.close();
-      } catch {
-        // ignore
-      }
-      socketRef.current = null;
+  const stopPolling = useCallback(() => {
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
     }
   }, []);
 
-  const handleMessage = useCallback((event: MessageEvent) => {
-    if (typeof event.data !== 'string') {
-      return;
-    }
+  const handleSnapshot = useCallback((snapshot: HostMessage) => {
     try {
-      const parsed = JSON.parse(event.data) as HostMessage;
-      if (parsed.type === 'queue_update') {
-        const queueEntries = Array.isArray(parsed.queue) ? (parsed.queue as HostParty[]) : [];
-        const serving = (parsed.nowServing ?? null) as HostParty | null;
+      if (snapshot.type === 'queue_update') {
+        const queueEntries = Array.isArray(snapshot.queue) ? (snapshot.queue as HostParty[]) : [];
+        const serving = (snapshot.nowServing ?? null) as HostParty | null;
         setQueue(queueEntries);
         setNowServing(serving);
-        if (typeof parsed.maxGuests === 'number') {
-          setCapacity(parsed.maxGuests);
+        if (typeof snapshot.maxGuests === 'number') {
+          setCapacity(snapshot.maxGuests);
         }
         const deadlineValue =
-          typeof parsed.callDeadline === 'number' ? parsed.callDeadline : null;
+          typeof snapshot.callDeadline === 'number' ? snapshot.callDeadline : null;
         setCallDeadline(serving ? deadlineValue : null);
         if (queueEntries.length > 0 || serving) {
           setClosed(false);
         }
         setConnectionError(null);
-      } else if (parsed.type === 'closed') {
+      } else if (snapshot.type === 'closed') {
         setQueue([]);
         setNowServing(null);
         setCallDeadline(null);
@@ -180,7 +177,46 @@ export default function HostQueueScreen({ route }: Props) {
     }
   }, []);
 
-  const connect = useCallback(() => {
+  const poll = useCallback(async () => {
+    if (!hasHostAuth) {
+      return;
+    }
+
+    try {
+      const headers: HeadersInit = {};
+      if (etag.current) {
+        headers['If-None-Match'] = etag.current;
+      }
+
+      const response = await fetch(snapshotUrl, { headers });
+
+      if (response.status === 304) {
+        // No changes, connection is healthy
+        setConnectionState('open');
+        setConnectionError(null);
+        return;
+      }
+
+      if (response.ok) {
+        const newEtag = response.headers.get('ETag');
+        if (newEtag) {
+          etag.current = newEtag;
+        }
+        const data = await response.json();
+        handleSnapshot(data);
+        setConnectionState('open');
+        setConnectionError(null);
+      } else {
+        console.warn('[HostQueueScreen] Poll failed:', response.status);
+        setConnectionError(`Poll failed: ${response.status}. Retrying...`);
+      }
+    } catch (error) {
+      console.error('[HostQueueScreen] Poll error:', error);
+      setConnectionError('Connection error. Retrying...');
+    }
+  }, [hasHostAuth, snapshotUrl, handleSnapshot]);
+
+  const startPolling = useCallback(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
       setConnectionError(
@@ -190,40 +226,20 @@ export default function HostQueueScreen({ route }: Props) {
     }
 
     clearReconnectTimeout();
-    closeSocket();
+    stopPolling();
     setConnectionState('connecting');
     setConnectionError(null);
 
-    const socket = new WebSocket(webSocketUrl);
-    socketRef.current = socket;
+    console.log('[HostQueueScreen] Starting polling');
 
-    socket.onopen = () => {
-      console.log('[HostQueueScreen] WebSocket open');
-      setConnectionState('open');
-      setConnectionError(null);
-    };
+    // Poll immediately
+    poll();
 
-    socket.onmessage = handleMessage;
-
-    socket.onerror = (event) => {
-      console.warn('[HostQueueScreen] WebSocket error', event);
-      setConnectionError('WebSocket error. Attempting to reconnect…');
-    };
-
-    socket.onclose = (event) => {
-      console.log('[HostQueueScreen] WebSocket closed', event.code, event.reason);
-      setConnectionState('closed');
-      if (!closed) {
-        setConnectionError('Connection closed. Attempting to reconnect…');
-      }
-      if (hasHostAuth) {
-        clearReconnectTimeout();
-        reconnectTimeout.current = setTimeout(() => {
-          connect();
-        }, RECONNECT_DELAY_MS);
-      }
-    };
-  }, [hasHostAuth, clearReconnectTimeout, closeSocket, webSocketUrl, handleMessage, closed]);
+    // Then poll every POLL_INTERVAL_MS
+    pollInterval.current = setInterval(() => {
+      poll();
+    }, POLL_INTERVAL_MS);
+  }, [hasHostAuth, clearReconnectTimeout, stopPolling, poll]);
 
   useEffect(() => {
     if (!hasHostAuth) {
@@ -233,12 +249,12 @@ export default function HostQueueScreen({ route }: Props) {
       );
       return;
     }
-    connect();
+    startPolling();
     return () => {
       clearReconnectTimeout();
-      closeSocket();
+      stopPolling();
     };
-  }, [connect, clearReconnectTimeout, closeSocket, hasHostAuth]);
+  }, [startPolling, clearReconnectTimeout, stopPolling, hasHostAuth]);
 
   const queueCount = queue.length;
   const connectionLabel =
@@ -605,9 +621,9 @@ export default function HostQueueScreen({ route }: Props) {
   const reconnectManually = useCallback(
     (event?: GestureResponderEvent) => {
       event?.preventDefault();
-      connect();
+      startPolling();
     },
-    [connect]
+    [startPolling]
   );
 
   const renderQueueList = () => {

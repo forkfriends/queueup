@@ -42,6 +42,8 @@ export class QueueDO implements DurableObject {
   private closed = false;
   private maxGuests = DEFAULT_MAX_GUESTS;
   private callDeadline: number | null = null;
+  private createdAt: number;
+  private lastActivityAt: number;
 
   private sockets = new Map<WebSocket, ConnectionInfo>();
   private guestSockets = new Map<string, Set<WebSocket>>();
@@ -50,11 +52,20 @@ export class QueueDO implements DurableObject {
   private pendingPushes = new Map<string, 'called' | 'pos_2' | 'pos_5'>();
   private pushAlarmScheduled = false;
 
+  // Cost optimization settings
+  private static readonly INACTIVE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
+  private static readonly MAX_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
+  private static readonly HEARTBEAT_INTERVAL_MS = 30 * 1000; // 30 seconds
+  private heartbeatTimer: number | null = null;
+
   constructor(
     private readonly state: DurableObjectState,
     private readonly env: Env
   ) {
     this.sessionId = state.id.toString();
+    const now = Date.now();
+    this.createdAt = now;
+    this.lastActivityAt = now;
     this.state.blockConcurrencyWhile(async () => {
       await this.restoreState();
     });
@@ -66,6 +77,11 @@ export class QueueDO implements DurableObject {
     if (request.headers.get('Upgrade') === 'websocket' && url.pathname === '/connect') {
       console.log(logPrefix(this.sessionId, 'fetch'), 'websocket connect request received');
       return this.handleWebSocket(request, url);
+    }
+
+    // GET /snapshot - read current state from KV (for polling clients)
+    if (request.method === 'GET' && url.pathname === '/snapshot') {
+      return this.handleSnapshot(request);
     }
 
     if (request.method !== 'POST') {
@@ -91,9 +107,31 @@ export class QueueDO implements DurableObject {
   }
 
   async alarm(): Promise<void> {
+    const now = Date.now();
+
+    // Check for queue expiration (cost optimization)
+    if (!this.closed) {
+      const lifetime = now - this.createdAt;
+      const inactiveDuration = now - this.lastActivityAt;
+
+      // Force close if exceeded max lifetime
+      if (lifetime > QueueDO.MAX_LIFETIME_MS) {
+        console.log(`[QueueDO ${this.sessionId}] Auto-closing: exceeded max lifetime (${Math.round(lifetime / 3600000)}h)`);
+        await this.handleAutoClose('max_lifetime_exceeded');
+        return;
+      }
+
+      // Auto-close if inactive for too long AND queue is empty
+      if (inactiveDuration > QueueDO.INACTIVE_TIMEOUT_MS && this.queue.length === 0 && !this.nowServing) {
+        console.log(`[QueueDO ${this.sessionId}] Auto-closing: inactive for ${Math.round(inactiveDuration / 60000)} minutes`);
+        await this.handleAutoClose('inactivity');
+        return;
+      }
+    }
+
     // Handle no-show timeout if needed
     if (this.pendingPartyId && this.nowServing && this.nowServing.id === this.pendingPartyId) {
-      const timeElapsed = Date.now() - (this.callDeadline ?? 0);
+      const timeElapsed = now - (this.callDeadline ?? 0);
       // Only mark as no-show if call timeout has actually elapsed
       if (timeElapsed >= 0) {
         await this.markPartyAsNoShow(this.nowServing.id);
@@ -103,9 +141,16 @@ export class QueueDO implements DurableObject {
 
     // Process batched push notifications
     await this.processPendingPushes();
+
+    // Schedule next alarm for lifecycle checks if not closed
+    if (!this.closed) {
+      await this.scheduleLifecycleAlarm();
+    }
   }
 
   private async handleJoin(request: Request): Promise<Response> {
+    this.trackActivity(); // Cost optimization: track activity
+
     if (this.closed) {
       return this.jsonError('Session closed', 409);
     }
@@ -162,7 +207,17 @@ export class QueueDO implements DurableObject {
     }
 
     await this.persistState();
-    this.broadcastHostSnapshot();
+    await this.publishState();
+
+    // Emit event for background processing
+    await this.emitEvent({
+      type: 'QUEUE_MEMBER_JOINED',
+      sessionId: this.sessionId,
+      partyId: party.id,
+      position: this.queue.length,
+      queueLength: this.queue.length,
+    });
+
     this.broadcastGuestPositions();
     await this.triggerPositionPushes();
 
@@ -182,6 +237,7 @@ export class QueueDO implements DurableObject {
   }
 
   private async handleDeclareNearby(request: Request): Promise<Response> {
+    this.trackActivity(); // Cost optimization: track activity
     const payload = await this.readJson(request);
     if (!payload) {
       return this.jsonError('Invalid JSON body', 400);
@@ -200,13 +256,14 @@ export class QueueDO implements DurableObject {
       party.nearby = true;
       await this.env.DB.prepare('UPDATE parties SET nearby = 1 WHERE id = ?1').bind(partyId).run();
       await this.persistState();
-      this.broadcastHostSnapshot();
+      await this.publishState();
     }
 
     return this.jsonResponse({ ok: true });
   }
 
   private async handleLeave(request: Request): Promise<Response> {
+    this.trackActivity(); // Cost optimization: track activity
     const payload = await this.readJson(request);
     if (!payload) {
       return this.jsonError('Invalid JSON body', 400);
@@ -263,6 +320,8 @@ export class QueueDO implements DurableObject {
   }
 
   private async handleAdvance(request: Request): Promise<Response> {
+    this.trackActivity(); // Cost optimization: track activity
+
     const hostVerified = await this.verifyHostRequest(request);
     if (hostVerified instanceof Response) {
       return hostVerified;
@@ -309,10 +368,65 @@ export class QueueDO implements DurableObject {
     await this.state.storage.deleteAlarm();
     await this.persistState();
 
-    this.broadcastHostSnapshot();
+    await this.publishState();
+
+    // Emit event for queue closed
+    await this.emitEvent({
+      type: 'QUEUE_CLOSED',
+      sessionId: this.sessionId,
+    });
+
     this.notifyAllGuestsClosed();
 
     return this.jsonResponse({ ok: true });
+  }
+
+  private async handleSnapshot(request: Request): Promise<Response> {
+    // Read snapshot from KV instead of DO state (much cheaper)
+    const key = `queue:${this.sessionId}:snapshot`;
+    const snapshot = await this.env.QUEUE_KV.get(key);
+
+    if (!snapshot) {
+      // No snapshot yet, return empty queue state
+      return new Response(
+        JSON.stringify({
+          type: 'queue_update',
+          queue: [],
+          nowServing: null,
+          maxGuests: this.maxGuests,
+          callDeadline: null,
+          closed: this.closed,
+        }),
+        {
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-cache, no-store, must-revalidate',
+          },
+        }
+      );
+    }
+
+    // Compute ETag from snapshot content
+    const encoder = new TextEncoder();
+    const data = encoder.encode(snapshot);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    const etag = `"${hashHex.substring(0, 16)}"`;
+
+    // Check if client has current version
+    const clientEtag = request.headers.get('if-none-match');
+    if (clientEtag === etag) {
+      return new Response(null, { status: 304 });
+    }
+
+    return new Response(snapshot, {
+      headers: {
+        'content-type': 'application/json',
+        etag,
+        'cache-control': 'no-cache, no-store, must-revalidate',
+      },
+    });
   }
 
   private async handleWebSocket(request: Request, url: URL): Promise<Response> {
@@ -406,6 +520,11 @@ export class QueueDO implements DurableObject {
       set.add(socket);
       this.guestSockets.set(info.partyId, set);
     }
+
+    // Start heartbeat if this is the first socket
+    if (this.sockets.size === 1 && !this.heartbeatTimer) {
+      this.startHeartbeat();
+    }
   }
 
   private unregisterSocket(socket: WebSocket): void {
@@ -424,6 +543,11 @@ export class QueueDO implements DurableObject {
           this.guestSockets.delete(info.partyId);
         }
       }
+    }
+
+    // Stop heartbeat if no more sockets
+    if (this.sockets.size === 0 && this.heartbeatTimer) {
+      this.stopHeartbeat();
     }
   }
 
@@ -467,6 +591,14 @@ export class QueueDO implements DurableObject {
       ]);
 
       this.notifyGuestRemoval(servedPartyId, 'served');
+
+      // Emit event for served party
+      await this.emitEvent({
+        type: 'QUEUE_MEMBER_SERVED',
+        sessionId: this.sessionId,
+        partyId: servedPartyId,
+      });
+
       this.nowServing = null;
       this.pendingPartyId = null;
       await this.state.storage.deleteAlarm();
@@ -503,8 +635,14 @@ export class QueueDO implements DurableObject {
       await this.persistState();
 
       this.notifyGuestCalled(selectedParty.id);
-      this.queuePushNotification(selectedParty.id, 'called');
-      // Don't schedule push alarm here - the no-show alarm will process pushes when it fires
+
+      // Emit event for push notification
+      await this.emitEvent({
+        type: 'QUEUE_MEMBER_CALLED',
+        sessionId: this.sessionId,
+        partyId: selectedParty.id,
+        deadline: this.callDeadline,
+      });
     } else {
       this.nowServing = null;
       this.pendingPartyId = null;
@@ -513,7 +651,7 @@ export class QueueDO implements DurableObject {
       await this.persistState();
     }
 
-    this.broadcastHostSnapshot();
+    await this.publishState();
     this.broadcastGuestPositions();
 
     return { nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null };
@@ -539,6 +677,15 @@ export class QueueDO implements DurableObject {
     ]);
 
     this.notifyGuestRemoval(partyId, 'no_show');
+
+    // Emit event for dropped party (no-show)
+    await this.emitEvent({
+      type: 'QUEUE_MEMBER_DROPPED',
+      sessionId: this.sessionId,
+      partyId,
+      reason: 'no_show',
+    });
+
     this.nowServing = null;
     this.pendingPartyId = null;
     this.callDeadline = null;
@@ -560,9 +707,18 @@ export class QueueDO implements DurableObject {
     }
 
     await this.persistState();
-    this.broadcastHostSnapshot();
+    await this.publishState();
     this.broadcastGuestPositions();
     this.notifyGuestRemoval(partyId, reason);
+
+    // Emit event for dropped party
+    const eventType = reason === 'left' ? 'QUEUE_MEMBER_LEFT' : reason === 'kicked' ? 'QUEUE_MEMBER_KICKED' : 'QUEUE_MEMBER_DROPPED';
+    await this.emitEvent({
+      type: eventType as any,
+      sessionId: this.sessionId,
+      partyId,
+      reason,
+    });
 
     await this.triggerPositionPushes();
     return true;
@@ -584,6 +740,59 @@ export class QueueDO implements DurableObject {
     return true;
   }
 
+  /**
+   * Write current queue state snapshot to KV for client polling.
+   * Expires after 60 seconds (minimum KV TTL) to ensure fresh data.
+   */
+  private async writeSnapshotToKV(): Promise<void> {
+    const snapshot = {
+      type: 'queue_update',
+      queue: this.queue.map((entry) => this.toHostParty(entry)),
+      nowServing: this.nowServing ? this.toHostParty(this.nowServing) : null,
+      maxGuests: this.maxGuests,
+      callDeadline: this.callDeadline,
+      closed: this.closed,
+    };
+    const key = `queue:${this.sessionId}:snapshot`;
+    await this.env.QUEUE_KV.put(key, JSON.stringify(snapshot), { expirationTtl: 60 });
+  }
+
+  /**
+   * Emit an event to Cloudflare Queue for background processing.
+   * Events include push notifications, analytics, and D1 logging.
+   */
+  private async emitEvent(event: {
+    type: 'QUEUE_MEMBER_CALLED' | 'QUEUE_POSITION_2' | 'QUEUE_POSITION_5' | 'QUEUE_MEMBER_DROPPED' | 'QUEUE_MEMBER_SERVED' | 'QUEUE_MEMBER_LEFT' | 'QUEUE_MEMBER_KICKED' | 'QUEUE_CLOSED' | 'QUEUE_MEMBER_JOINED';
+    sessionId: string;
+    partyId?: string;
+    reason?: string;
+    position?: number;
+    queueLength?: number;
+    deadline?: number | null;
+  }): Promise<void> {
+    try {
+      await this.env.EVENTS.send(event);
+    } catch (error) {
+      console.error(logPrefix(this.sessionId, 'emitEvent'), 'Failed to send event:', error);
+    }
+  }
+
+  /**
+   * Publish current state to both KV (for polling) and WebSockets (for legacy clients).
+   * This should be called after any state mutation.
+   */
+  private async publishState(): Promise<void> {
+    // Write to KV for polling clients
+    await this.writeSnapshotToKV();
+
+    // Broadcast to WebSocket clients (legacy support)
+    this.broadcastHostSnapshot();
+  }
+
+  /**
+   * Legacy method kept for WebSocket support (deprecated).
+   * New clients should use HTTP polling against KV snapshot.
+   */
   private broadcastHostSnapshot(): void {
     const message = JSON.stringify({
       type: 'queue_update',
@@ -637,9 +846,25 @@ export class QueueDO implements DurableObject {
     for (const [idx, kind] of candidates) {
       const party = this.queue[idx];
       if (!party) continue;
-      this.queuePushNotification(party.id, kind);
+      // Emit event to Cloudflare Queue for background push notification
+      if (kind === 'pos_2') {
+        await this.emitEvent({
+          type: 'QUEUE_POSITION_2',
+          sessionId: this.sessionId,
+          partyId: party.id,
+          position: 2,
+          queueLength: this.queue.length,
+        });
+      } else if (kind === 'pos_5') {
+        await this.emitEvent({
+          type: 'QUEUE_POSITION_5',
+          sessionId: this.sessionId,
+          partyId: party.id,
+          position: 5,
+          queueLength: this.queue.length,
+        });
+      }
     }
-    await this.scheduleNextPushAlarm();
   }
 
   /**
@@ -1054,4 +1279,111 @@ export class QueueDO implements DurableObject {
       this.unregisterSocket(socket);
     }
   }
+
+  /**
+   * Track activity to prevent auto-close of active queues.
+   * Called on every guest/host action.
+   */
+  private trackActivity(): void {
+    this.lastActivityAt = Date.now();
+  }
+
+  /**
+   * Auto-close queue due to inactivity or lifetime limits.
+   * This is a cost optimization to prevent forgotten queues from running forever.
+   */
+  private async handleAutoClose(reason: 'inactivity' | 'max_lifetime_exceeded'): Promise<void> {
+    if (this.closed) return;
+
+    console.log(`[QueueDO ${this.sessionId}] Auto-closing queue: ${reason}`);
+
+    this.closed = true;
+    this.queue = [];
+    this.nowServing = null;
+    this.pendingPartyId = null;
+
+    await this.env.DB.batch([
+      this.env.DB.prepare("UPDATE sessions SET status = 'closed' WHERE id = ?1").bind(
+        this.sessionId
+      ),
+      this.env.DB.prepare(
+        "INSERT INTO events (session_id, type, details) VALUES (?1, 'auto_close', ?2)"
+      ).bind(this.sessionId, JSON.stringify({ reason })),
+    ]);
+
+    await this.state.storage.deleteAlarm();
+    await this.persistState();
+
+    await this.publishState();
+
+    // Emit event for auto-closed queue
+    await this.emitEvent({
+      type: 'QUEUE_CLOSED',
+      sessionId: this.sessionId,
+      reason,
+    });
+
+    this.notifyAllGuestsClosed();
+  }
+
+  /**
+   * Schedule an alarm to check queue lifecycle (inactivity/expiration).
+   * Runs every 15 minutes to check if queue should be auto-closed.
+   */
+  private async scheduleLifecycleAlarm(): Promise<void> {
+    const existingAlarm = await this.state.storage.getAlarm();
+
+    // If there's already an alarm scheduled sooner, don't override it
+    const CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+    const nextCheck = Date.now() + CHECK_INTERVAL_MS;
+
+    if (!existingAlarm || existingAlarm > nextCheck) {
+      await this.state.storage.setAlarm(nextCheck);
+    }
+  }
+
+  /**
+   * Start sending heartbeat pings to all connected WebSockets.
+   * Helps detect dead connections and clean them up to save costs.
+   */
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer) return;
+
+    this.heartbeatTimer = setInterval(() => {
+      const deadSockets: WebSocket[] = [];
+
+      for (const [socket, info] of this.sockets.entries()) {
+        try {
+          const readyState = (socket as any).readyState;
+          // 0 = CONNECTING, 1 = OPEN, 2 = CLOSING, 3 = CLOSED
+          if (readyState === 1) {
+            // Send ping only to open sockets
+            socket.send(JSON.stringify({ type: 'ping' }));
+          } else if (readyState >= 2) {
+            // Mark closed/closing sockets for cleanup
+            deadSockets.push(socket);
+          }
+        } catch (error) {
+          console.error('Heartbeat error', error);
+          deadSockets.push(socket);
+        }
+      }
+
+      // Clean up dead sockets
+      for (const socket of deadSockets) {
+        this.unregisterSocket(socket);
+      }
+    }, QueueDO.HEARTBEAT_INTERVAL_MS) as any;
+  }
+
+  /**
+   * Stop the heartbeat timer.
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
 }
+

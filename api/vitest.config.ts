@@ -3,7 +3,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
-const wranglerConfigPath = resolve(rootDir, 'wrangler.toml');
+const wranglerConfigPath = resolve(rootDir, 'wrangler.test.toml');
 
 export default defineWorkersConfig({
   test: {

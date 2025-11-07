@@ -25,6 +25,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 10;
 const DEFAULT_QUEUE_SIZE = 1;
+const POLL_INTERVAL_MS = 10000;
 
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const routeCode =
@@ -54,7 +55,8 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
-  const socketRef = useRef<WebSocket | null>(null);
+  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const etag = useRef<string | null>(null);
   const turnstileRef = useRef<any>(null);
   const inQueue = Boolean(joinedCode && partyId);
   const isWeb = Platform.OS === 'web';
@@ -200,14 +202,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
   }, []);
 
-  const closeActiveSocket = useCallback(() => {
-    if (socketRef.current) {
-      try {
-        socketRef.current.close(1000, 'client_closed');
-      } catch {
-        // ignore socket close errors
-      }
-      socketRef.current = null;
+  const stopPolling = useCallback(() => {
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
     }
   }, []);
 
@@ -215,7 +213,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     (message?: string) => {
       shouldReconnectRef.current = false;
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
       reconnectAttempt.current = 0;
       setJoinedCode(null);
       setPartyId(null);
@@ -228,8 +226,116 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         setResultText(message);
       }
     },
-    [clearReconnect, closeActiveSocket]
+    [clearReconnect, stopPolling]
   );
+
+  const snapshotUrl = useMemo(() => {
+    if (!joinedCode || !partyId) return null;
+    const wsUrl = buildGuestConnectUrl(joinedCode, partyId);
+    return wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+  }, [joinedCode, partyId]);
+
+  const handleSnapshot = useCallback((data: Record<string, unknown>) => {
+    try {
+      switch (data.type) {
+        case 'position': {
+          const position = Number(data.position);
+          const aheadCount = Number(data.aheadCount);
+          if (!Number.isNaN(position)) {
+            setResultText(
+              aheadCount >= 0
+                ? `You're number ${position} in line. ${aheadCount} ${
+                    aheadCount === 1 ? 'party' : 'parties'
+                  } ahead of you.`
+                : `You're number ${position} in line.`
+            );
+          }
+          break;
+        }
+        case 'called': {
+          setResultText("You're being served now! Please head to the host.");
+          break;
+        }
+        case 'removed': {
+          const reason = data.reason;
+          const reasonMessages: Record<string, string> = {
+            served: 'All set! You have been marked as served.',
+            no_show: "We couldn't reach you, so you were removed from the queue.",
+            kicked: 'The host removed you from the queue.',
+            closed: 'Queue closed. Thanks for your patience!',
+          };
+          const message = reasonMessages[reason as string] ?? 'You have left the queue.';
+          resetSession(message);
+          break;
+        }
+        case 'closed': {
+          resetSession('Queue closed by the host. Thanks for waiting with us!');
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (err) {
+      console.warn('Failed to parse guest snapshot payload', err);
+    }
+  }, [resetSession]);
+
+  const poll = useCallback(async () => {
+    if (!snapshotUrl) {
+      return;
+    }
+
+    try {
+      const headers: HeadersInit = {};
+      if (etag.current) {
+        headers['If-None-Match'] = etag.current;
+      }
+
+      const response = await fetch(snapshotUrl, { headers });
+
+      if (response.status === 304) {
+        // No changes, connection is healthy
+        setConnectionState('open');
+        return;
+      }
+
+      if (response.ok) {
+        const newEtag = response.headers.get('ETag');
+        if (newEtag) {
+          etag.current = newEtag;
+        }
+        const data = await response.json();
+        handleSnapshot(data);
+        setConnectionState('open');
+      } else {
+        console.warn('[JoinQueueScreen] Poll failed:', response.status);
+        setConnectionState('closed');
+      }
+    } catch (error) {
+      console.error('[JoinQueueScreen] Poll error:', error);
+      setConnectionState('closed');
+    }
+  }, [snapshotUrl, handleSnapshot]);
+
+  const startPolling = useCallback(() => {
+    if (!snapshotUrl) {
+      return;
+    }
+
+    clearReconnect();
+    stopPolling();
+    setConnectionState('connecting');
+
+    console.log('[JoinQueueScreen] Starting polling');
+
+    // Poll immediately
+    poll();
+
+    // Then poll every POLL_INTERVAL_MS
+    pollInterval.current = setInterval(() => {
+      poll();
+    }, POLL_INTERVAL_MS);
+  }, [snapshotUrl, clearReconnect, stopPolling, poll]);
 
   useEffect(() => {
     if (!joinedCode || !partyId) {
@@ -237,90 +343,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
 
     shouldReconnectRef.current = true;
-    const wsUrl = buildGuestConnectUrl(joinedCode, partyId);
-
-    const connect = () => {
-      clearReconnect();
-      closeActiveSocket();
-      setConnectionState('connecting');
-
-      const socket = new WebSocket(wsUrl);
-      socketRef.current = socket;
-      socket.onopen = () => {
-        setConnectionState('open');
-      };
-      socket.onmessage = (event) => {
-        if (typeof event.data !== 'string') return;
-        try {
-          const data = JSON.parse(event.data) as Record<string, unknown>;
-          switch (data.type) {
-            case 'position': {
-              const position = Number(data.position);
-              const aheadCount = Number(data.aheadCount);
-              if (!Number.isNaN(position)) {
-                setResultText(
-                  aheadCount >= 0
-                    ? `You're number ${position} in line. ${aheadCount} ${
-                        aheadCount === 1 ? 'party' : 'parties'
-                      } ahead of you.`
-                    : `You're number ${position} in line.`
-                );
-              }
-              break;
-            }
-            case 'called': {
-              setResultText("You're being served now! Please head to the host.");
-              break;
-            }
-            case 'removed': {
-              const reason = data.reason;
-              const reasonMessages: Record<string, string> = {
-                served: 'All set! You have been marked as served.',
-                no_show: "We couldn't reach you, so you were removed from the queue.",
-                kicked: 'The host removed you from the queue.',
-                closed: 'Queue closed. Thanks for your patience!',
-              };
-              const message = reasonMessages[reason as string] ?? 'You have left the queue.';
-              resetSession(message);
-              break;
-            }
-            case 'closed': {
-              resetSession('Queue closed by the host. Thanks for waiting with us!');
-              break;
-            }
-            default:
-              break;
-          }
-        } catch (err) {
-          console.warn('Failed to parse guest WS payload', err);
-        }
-      };
-      socket.onclose = (event) => {
-        if (socketRef.current === socket) {
-          socketRef.current = null;
-        }
-        setConnectionState('closed');
-        if (shouldReconnectRef.current && event.code !== 1000) {
-          clearReconnect();
-          reconnectTimer.current = setTimeout(() => {
-            reconnectAttempt.current += 1;
-            connect();
-          }, 2000);
-        }
-      };
-      socket.onerror = () => {
-        setConnectionState('closed');
-      };
-    };
-
-    connect();
+    startPolling();
 
     return () => {
       shouldReconnectRef.current = false;
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
     };
-  }, [joinedCode, partyId, clearReconnect, closeActiveSocket, resetSession]);
+  }, [joinedCode, partyId, clearReconnect, stopPolling, startPolling]);
 
   const enablePush = useCallback(
     async (options?: { sessionOverride?: string | null; partyOverride?: string | null; silent?: boolean }) => {
@@ -419,9 +449,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   useEffect(() => {
     return () => {
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
     };
-  }, [clearReconnect, closeActiveSocket]);
+  }, [clearReconnect, stopPolling]);
 
   useEffect(() => {
     if (!isWeb || !sessionId || !partyId || pushReady) {

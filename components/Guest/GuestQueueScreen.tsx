@@ -25,6 +25,7 @@ import Timer from '../Timer';
 type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
 
 const MS_PER_MINUTE = 60 * 1000;
+const POLL_INTERVAL_MS = 10000;
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
     const {
@@ -78,10 +79,11 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [callDeadline, setCallDeadline] = useState<number | null>(null);
     const isWeb = Platform.OS === 'web';
 
-    const socketRef = useRef<WebSocket | null>(null);
+    const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const shouldReconnectRef = useRef(true);
     const autoPushAttemptRef = useRef<string | null>(null);
+    const etag = useRef<string | null>(null);
 
     const clearReconnect = useCallback(() => {
         if (reconnectTimer.current) {
@@ -90,14 +92,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         }
     }, []);
 
-    const closeActiveSocket = useCallback(() => {
-        if (socketRef.current) {
-        try {
-            socketRef.current.close(1000, 'client_closed');
-        } catch {
-            // ignore
-        }
-        socketRef.current = null;
+    const stopPolling = useCallback(() => {
+        if (pollInterval.current) {
+        clearInterval(pollInterval.current);
+        pollInterval.current = null;
         }
     }, []);
 
@@ -105,41 +103,23 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         (message: string) => {
       shouldReconnectRef.current = false;
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
       setConnectionState('closed');
       setIsActive(false);
       setStatusText(message);
       setCallDeadline(null);
     },
-    [clearReconnect, closeActiveSocket]
+    [clearReconnect, stopPolling]
   );
 
-    useEffect(() => {
-        if (!partyId || !code || !isActive) {
-        return undefined;
-        }
-
-        shouldReconnectRef.current = true;
+    const snapshotUrl = useMemo(() => {
+        if (!code || !partyId) return null;
         const wsUrl = buildGuestConnectUrl(code, partyId);
+        return wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    }, [code, partyId]);
 
-        const connect = () => {
-        clearReconnect();
-        closeActiveSocket();
-        setConnectionState('connecting');
-
-        const socket = new WebSocket(wsUrl);
-        socketRef.current = socket;
-
-        socket.onopen = () => {
-            setConnectionState('open');
-        };
-
-        socket.onmessage = (event) => {
-            if (typeof event.data !== 'string') {
-            return;
-            }
-            try {
-            const data = JSON.parse(event.data) as Record<string, unknown>;
+    const handleSnapshot = useCallback((data: Record<string, unknown>) => {
+        try {
             switch (data.type) {
                 case 'position': {
                 const newPosition = Number(data.position);
@@ -228,44 +208,89 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 default:
                 break;
             }
-            } catch (error) {
-            console.warn('Failed to parse guest WS payload', error);
-            }
-        };
+        } catch (error) {
+            console.warn('Failed to parse guest snapshot payload', error);
+        }
+    }, [endSession]);
 
-        socket.onclose = (event) => {
-            if (socketRef.current === socket) {
-            socketRef.current = null;
+    const poll = useCallback(async () => {
+        if (!snapshotUrl) {
+            return;
+        }
+
+        try {
+            const headers: HeadersInit = {};
+            if (etag.current) {
+                headers['If-None-Match'] = etag.current;
             }
+
+            const response = await fetch(snapshotUrl, { headers });
+
+            if (response.status === 304) {
+                // No changes, connection is healthy
+                setConnectionState('open');
+                return;
+            }
+
+            if (response.ok) {
+                const newEtag = response.headers.get('ETag');
+                if (newEtag) {
+                    etag.current = newEtag;
+                }
+                const data = await response.json();
+                handleSnapshot(data);
+                setConnectionState('open');
+            } else {
+                console.warn('[GuestQueueScreen] Poll failed:', response.status);
+                setConnectionState('closed');
+            }
+        } catch (error) {
+            console.error('[GuestQueueScreen] Poll error:', error);
             setConnectionState('closed');
-            if (shouldReconnectRef.current && event.code !== 1000) {
-            clearReconnect();
-            reconnectTimer.current = setTimeout(() => {
-                connect();
-            }, 2000);
-            }
-        };
+        }
+    }, [snapshotUrl, handleSnapshot]);
 
-        socket.onerror = () => {
-            setConnectionState('closed');
-        };
-        };
+    const startPolling = useCallback(() => {
+        if (!snapshotUrl) {
+            return;
+        }
 
-        connect();
+        clearReconnect();
+        stopPolling();
+        setConnectionState('connecting');
+
+        console.log('[GuestQueueScreen] Starting polling');
+
+        // Poll immediately
+        poll();
+
+        // Then poll every POLL_INTERVAL_MS
+        pollInterval.current = setInterval(() => {
+            poll();
+        }, POLL_INTERVAL_MS);
+    }, [snapshotUrl, clearReconnect, stopPolling, poll]);
+
+    useEffect(() => {
+        if (!partyId || !code || !isActive) {
+        return undefined;
+        }
+
+        shouldReconnectRef.current = true;
+        startPolling();
 
         return () => {
         shouldReconnectRef.current = false;
         clearReconnect();
-        closeActiveSocket();
+        stopPolling();
         };
-    }, [code, partyId, isActive, clearReconnect, closeActiveSocket]);
+    }, [code, partyId, isActive, clearReconnect, stopPolling, startPolling]);
 
     useEffect(() => {
         return () => {
         clearReconnect();
-        closeActiveSocket();
+        stopPolling();
         };
-    }, [clearReconnect, closeActiveSocket]);
+    }, [clearReconnect, stopPolling]);
 
     const enablePush = useCallback(
         async (options?: { silent?: boolean }) => {

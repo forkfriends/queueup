@@ -11,6 +11,7 @@ export interface Env {
   QUEUE_DO: DurableObjectNamespace;
   QUEUE_KV: KVNamespace;
   DB: D1Database;
+  EVENTS: Queue;
   TURNSTILE_SECRET_KEY: string;
   HOST_AUTH_SECRET: string;
   VAPID_PUBLIC?: string;
@@ -25,7 +26,7 @@ export interface Env {
 const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/queueup/';
 
 const ROUTE =
-  /^\/api\/queue(?:\/(create|[A-Za-z0-9]{6})(?:\/(join|declare-nearby|leave|advance|kick|close|connect))?)?$/;
+  /^\/api\/queue(?:\/(create|[A-Za-z0-9]{6})(?:\/(join|declare-nearby|leave|advance|kick|close|connect|snapshot))?)?$/;
 const SHORT_CODE_LENGTH = 6;
 const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
@@ -180,6 +181,11 @@ export default {
         return applyCors(response, corsOrigin, ['set-cookie']);
       }
 
+      if (primary && action === 'snapshot' && request.method === 'GET') {
+        const response = await handleSnapshot(request, env, primary);
+        return applyCors(response, corsOrigin, ['etag']);
+      }
+
       if (request.method === 'POST' && primary && action) {
         const response = await handleAction(request, env, primary, action);
         return applyCors(response, corsOrigin);
@@ -195,7 +201,113 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // Scheduled cleanup will arrive in later checkpoints.
   },
+
+  async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
+    for (const message of batch.messages) {
+      try {
+        const event = message.body as {
+          type: string;
+          sessionId: string;
+          partyId?: string;
+          position?: number;
+          queueLength?: number;
+          deadline?: number | null;
+          reason?: string;
+        };
+
+        console.log(`[Queue Consumer] Processing event: ${event.type} for session ${event.sessionId}`);
+
+        // Handle push notifications
+        if (event.partyId) {
+          switch (event.type) {
+            case 'QUEUE_MEMBER_CALLED':
+              await sendPushToParty(env, event.sessionId, event.partyId, {
+                title: "It's your turn!",
+                body: `Please confirm within ${Math.floor((event.deadline ?? 0) / 60000)} minutes.`,
+                kind: 'called',
+              });
+              break;
+
+            case 'QUEUE_POSITION_2':
+              await sendPushToParty(env, event.sessionId, event.partyId, {
+                title: 'Almost there!',
+                body: "You're next in line.",
+                kind: 'pos_2',
+              });
+              break;
+
+            case 'QUEUE_POSITION_5':
+              await sendPushToParty(env, event.sessionId, event.partyId, {
+                title: 'Getting close!',
+                body: "You're 5th in line.",
+                kind: 'pos_5',
+              });
+              break;
+
+            case 'QUEUE_MEMBER_JOINED':
+              // Already handled in subscribe endpoint
+              break;
+
+            case 'QUEUE_MEMBER_SERVED':
+            case 'QUEUE_MEMBER_DROPPED':
+            case 'QUEUE_MEMBER_LEFT':
+            case 'QUEUE_MEMBER_KICKED':
+              // No push needed for these
+              break;
+          }
+        }
+
+        // Log event to D1 (optional analytics)
+        await env.DB.prepare(
+          "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'queue_event', ?3)"
+        )
+          .bind(
+            event.sessionId,
+            event.partyId ?? null,
+            JSON.stringify({ eventType: event.type, ...event })
+          )
+          .run();
+
+        message.ack();
+      } catch (error) {
+        console.error('[Queue Consumer] Error processing message:', error);
+        message.retry();
+      }
+    }
+  },
 };
+
+async function sendPushToParty(
+  env: Env,
+  sessionId: string,
+  partyId: string,
+  params: {
+    title: string;
+    body: string;
+    kind?: string;
+  }
+): Promise<boolean> {
+  const sub = await env.DB.prepare(
+    'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE session_id=?1 AND party_id=?2 ORDER BY created_at DESC LIMIT 1'
+  )
+    .bind(sessionId, partyId)
+    .first<{ endpoint: string; p256dh: string; auth: string }>();
+
+  if (!sub) {
+    console.log(`[sendPushToParty] No subscription found for party ${partyId}`);
+    return false;
+  }
+
+  return sendPushNotification(env, {
+    sessionId,
+    partyId,
+    subscription: { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+    title: params.title,
+    body: params.body,
+    url: buildAppUrl(env),
+    kind: params.kind,
+  });
+}
 
 async function sendPushNotification(
   env: Env,
@@ -442,6 +554,30 @@ async function handleConnect(request: Request, env: Env, code: string): Promise<
   }
 
   const forwardedRequest = new Request(doUrl.toString(), init);
+
+  return stub.fetch(forwardedRequest);
+}
+
+async function handleSnapshot(request: Request, env: Env, code: string): Promise<Response> {
+  const normalizedCode = code.toUpperCase();
+  const sessionId = await resolveSessionId(env, normalizedCode);
+  if (!sessionId) {
+    return new Response('Session not found', { status: 404 });
+  }
+
+  const id = env.QUEUE_DO.idFromString(sessionId);
+  const stub = env.QUEUE_DO.get(id);
+
+  const headers = new Headers(request.headers);
+  headers.set('x-session-id', sessionId);
+
+  const doUrl = new URL(request.url);
+  doUrl.pathname = '/snapshot';
+
+  const forwardedRequest = new Request(doUrl.toString(), {
+    method: 'GET',
+    headers,
+  });
 
   return stub.fetch(forwardedRequest);
 }

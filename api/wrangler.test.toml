@@ -1,16 +1,10 @@
 name = "queueup-api"
 main = "worker.ts"
 compatibility_date = "2024-11-01"
-# The nodejs_compat flag is required for the @block65/webcrypto-web-push package,
-# which depends on Node.js crypto APIs not available in the default Workers runtime.
-# Note: This may increase cold start times and memory usage.
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ALLOWED_ORIGINS = "https://forkfriends.github.io, http://localhost:8081"
-
-[triggers]
-crons = ["*/15 * * * *"]
 
 [[durable_objects.bindings]]
 name = "QUEUE_DO"
@@ -30,12 +24,10 @@ binding = "QUEUE_KV"
 id = "ba0c2edfecd14c02904cbc83cd27f634"
 preview_id = "6de7680b67444c6da3323fde8d2e74d5"
 
+# Queue producer binding (for emitting events)
 [[queues.producers]]
 queue = "queueup-events"
 binding = "EVENTS"
 
-[[queues.consumers]]
-queue = "queueup-events"
-max_batch_size = 10
-max_batch_timeout = 5
-
+# NOTE: Queue consumer is NOT defined here for testing
+# to avoid vitest conflicts with multiple queue consumers
