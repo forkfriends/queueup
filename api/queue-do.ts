@@ -46,6 +46,10 @@ export class QueueDO implements DurableObject {
   private sockets = new Map<WebSocket, ConnectionInfo>();
   private guestSockets = new Map<string, Set<WebSocket>>();
 
+  // Push notification batching state
+  private pendingPushes = new Map<string, 'called' | 'pos_2' | 'pos_5'>();
+  private pushAlarmScheduled = false;
+
   constructor(
     private readonly state: DurableObjectState,
     private readonly env: Env
@@ -87,12 +91,18 @@ export class QueueDO implements DurableObject {
   }
 
   async alarm(): Promise<void> {
-    if (!this.pendingPartyId || !this.nowServing || this.nowServing.id !== this.pendingPartyId) {
-      return;
+    // Handle no-show timeout if needed
+    if (this.pendingPartyId && this.nowServing && this.nowServing.id === this.pendingPartyId) {
+      const timeElapsed = Date.now() - (this.callDeadline ?? 0);
+      // Only mark as no-show if call timeout has actually elapsed
+      if (timeElapsed >= 0) {
+        await this.markPartyAsNoShow(this.nowServing.id);
+        await this.callNextParty();
+      }
     }
 
-    await this.markPartyAsNoShow(this.nowServing.id);
-    await this.callNextParty();
+    // Process batched push notifications
+    await this.processPendingPushes();
   }
 
   private async handleJoin(request: Request): Promise<Response> {
@@ -493,7 +503,8 @@ export class QueueDO implements DurableObject {
       await this.persistState();
 
       this.notifyGuestCalled(selectedParty.id);
-      this.sendPushSafe(selectedParty.id, 'called').catch((e) => console.warn('push called error', e));
+      this.queuePushNotification(selectedParty.id, 'called');
+      // Don't schedule push alarm here - the no-show alarm will process pushes when it fires
     } else {
       this.nowServing = null;
       this.pendingPartyId = null;
@@ -626,8 +637,84 @@ export class QueueDO implements DurableObject {
     for (const [idx, kind] of candidates) {
       const party = this.queue[idx];
       if (!party) continue;
-      await this.sendPushSafe(party.id, kind);
+      this.queuePushNotification(party.id, kind);
     }
+    await this.scheduleNextPushAlarm();
+  }
+
+  /**
+   * Queue a push notification to be sent in the next alarm cycle.
+   * This defers expensive crypto operations out of the request path.
+   * Later notifications for the same party override earlier ones (only send most recent state).
+   */
+  private queuePushNotification(partyId: string, kind: 'called' | 'pos_2' | 'pos_5'): void {
+    // Priority: 'called' > 'pos_2' > 'pos_5'
+    // If user is being called, don't send position updates
+    const existing = this.pendingPushes.get(partyId);
+    if (existing === 'called') return; // Don't override 'called' with position updates
+    if (kind === 'called' || existing !== 'called') {
+      this.pendingPushes.set(partyId, kind);
+    }
+  }
+
+  /**
+   * Schedule an alarm to process pending push notifications.
+   * Uses a short delay (2-5 seconds) to batch multiple operations.
+   */
+  private async scheduleNextPushAlarm(): Promise<void> {
+    if (this.pendingPushes.size === 0) return;
+    if (this.pushAlarmScheduled) return; // Already scheduled
+
+    // Delay push notifications by 3 seconds to allow batching
+    // This means position updates arrive 3s delayed, but saves massive CPU
+    const PUSH_BATCH_DELAY_MS = 3000;
+
+    // Check if there's already an alarm scheduled for no-show timeout
+    const existingAlarm = await this.state.storage.getAlarm();
+
+    if (existingAlarm === null) {
+      // No alarm scheduled, schedule one for push processing
+      await this.state.storage.setAlarm(Date.now() + PUSH_BATCH_DELAY_MS);
+      this.pushAlarmScheduled = true;
+    } else {
+      // There's already an alarm (likely for no-show timeout)
+      // Don't override it - pushes will be processed when that alarm fires
+      const existingTime = existingAlarm;
+      const pushTime = Date.now() + PUSH_BATCH_DELAY_MS;
+
+      // Only reschedule if push alarm would fire before the existing alarm
+      if (pushTime < existingTime) {
+        await this.state.storage.setAlarm(pushTime);
+      }
+      this.pushAlarmScheduled = true;
+    }
+  }
+
+  /**
+   * Process all pending push notifications in a batch.
+   * Called by alarm handler - runs outside the request path.
+   */
+  private async processPendingPushes(): Promise<void> {
+    this.pushAlarmScheduled = false;
+
+    if (this.pendingPushes.size === 0) return;
+
+    // Skip if VAPID keys not configured (e.g., in tests)
+    if (!this.env.VAPID_PUBLIC || !this.env.VAPID_PRIVATE) {
+      this.pendingPushes.clear();
+      return;
+    }
+
+    const batch = Array.from(this.pendingPushes.entries());
+    this.pendingPushes.clear();
+
+    console.log(`[QueueDO] Processing ${batch.length} batched push notifications`);
+
+    // Process all notifications concurrently for speed
+    // Use allSettled to prevent one failure from blocking others
+    await Promise.allSettled(
+      batch.map(([partyId, kind]) => this.sendPushSafe(partyId, kind))
+    );
   }
 
   private async sendPushSafe(partyId: string, kind: 'called' | 'pos_2' | 'pos_5'): Promise<void> {
