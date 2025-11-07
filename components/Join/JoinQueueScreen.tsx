@@ -98,16 +98,11 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         size: partySize,
         turnstileToken: turnstileToken ?? undefined,
       });
-      setResultText(`You're number ${joinResult.position} in line. We'll keep this updated.`);
-      setJoinedCode(trimmed);
-      setPartyId(joinResult.partyId);
-      setSessionId(joinResult.sessionId ?? null);
-      // Reset Turnstile for next use
       setTurnstileToken(null);
       if (turnstileRef.current?.reset) {
         turnstileRef.current.reset();
       }
-      // Debug: log identifiers for wrangler-side push testing
+      const guestName = name.trim();
       if (typeof window !== 'undefined' && (window as any).console) {
         console.log('[QueueUp][join]', {
           ts: new Date().toISOString(),
@@ -116,6 +111,18 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           code: trimmed,
         });
       }
+      navigation.replace('GuestQueueScreen', {
+        code: trimmed,
+        partyId: joinResult.partyId,
+        sessionId: joinResult.sessionId ?? null,
+        initialPosition: joinResult.position,
+        initialAheadCount: Math.max(joinResult.position - 1, 0),
+        initialQueueLength: joinResult.queueLength ?? null,
+        initialEtaMs: joinResult.estimatedWaitMs ?? null,
+        guestName: guestName || undefined,
+        partySize,
+      });
+      return;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error joining queue';
 

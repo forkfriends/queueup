@@ -15,17 +15,20 @@ interface QueueUpdateMessage {
     status: string;
   };
   maxGuests?: number;
+  callDeadline?: number | null;
 }
 
 interface PositionMessage {
   type: 'position';
   position: number;
   aheadCount: number;
+  queueLength: number;
+  estimatedWaitMs: number;
 }
 
 type GuestMessage =
   | PositionMessage
-  | { type: 'called' }
+  | { type: 'called'; deadline?: number | null }
   | { type: 'removed'; reason: string }
   | { type: 'closed' };
 
@@ -120,6 +123,7 @@ describe('queue lifecycle integration', () => {
     expect(hostInitial.type).toBe('queue_update');
     expect(hostInitial.queue.length).toBe(0);
   expect(hostInitial.maxGuests).toBe(desiredMaxGuests);
+    expect(hostInitial.callDeadline ?? null).toBeNull();
 
     // Guest joins queue.
     const joinResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
@@ -128,8 +132,15 @@ describe('queue lifecycle integration', () => {
       body: JSON.stringify({ name: 'Alice', size: 2, turnstileToken: 'stub-token' }),
     });
     expect(joinResponse.status).toBe(200);
-    const joinBody = await joinResponse.json<{ partyId: string; position: number }>();
+    const joinBody = await joinResponse.json<{
+      partyId: string;
+      position: number;
+      queueLength: number;
+      estimatedWaitMs: number;
+    }>();
     expect(joinBody.position).toBe(1);
+    expect(joinBody.queueLength).toBe(1);
+    expect(joinBody.estimatedWaitMs).toBe(0);
     const partyId = joinBody.partyId;
 
     const hostAfterJoin = await hostWs.waitForMessage<QueueUpdateMessage>();
@@ -137,6 +148,7 @@ describe('queue lifecycle integration', () => {
     expect(hostAfterJoin.queue[0].id).toBe(partyId);
     expect(hostAfterJoin.queue[0].status).toBe('waiting');
     expect(hostAfterJoin.maxGuests).toBe(desiredMaxGuests);
+    expect(hostAfterJoin.callDeadline ?? null).toBeNull();
 
     // Additional guest should not be able to join while capacity is full.
     const overCapacityResponse = await fetchJson(`/api/queue/${shortCode}/join`, {
@@ -153,6 +165,8 @@ describe('queue lifecycle integration', () => {
     expect(guestInitial.type).toBe('position');
     if (guestInitial.type === 'position') {
       expect(guestInitial.position).toBe(1);
+      expect(guestInitial.queueLength).toBeGreaterThan(0);
+      expect(guestInitial.estimatedWaitMs).toBeGreaterThanOrEqual(0);
     }
 
     // Guest declares nearby.
@@ -165,6 +179,7 @@ describe('queue lifecycle integration', () => {
     const hostAfterNearby = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterNearby.queue[0].nearby).toBe(true);
   expect(hostAfterNearby.maxGuests).toBe(desiredMaxGuests);
+    expect(hostAfterNearby.callDeadline ?? null).toBeNull();
 
     // Host advances queue.
     const advanceResponse = await fetchJson(`/api/queue/${shortCode}/advance`, {
@@ -182,9 +197,13 @@ describe('queue lifecycle integration', () => {
     const hostAfterAdvance = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterAdvance.nowServing?.id).toBe(partyId);
   expect(hostAfterAdvance.maxGuests).toBe(desiredMaxGuests);
+    expect(typeof hostAfterAdvance.callDeadline).toBe('number');
 
     const guestCalled = await guestWs.waitForMessage<GuestMessage>();
     expect(guestCalled.type).toBe('called');
+    if (guestCalled.type === 'called') {
+      expect(typeof guestCalled.deadline === 'number' || guestCalled.deadline === null).toBe(true);
+    }
 
     // Alarm should mark the party as no_show and auto-advance.
     const durableId = env.QUEUE_DO.idFromString(sessionId);
@@ -195,6 +214,7 @@ describe('queue lifecycle integration', () => {
     const hostAfterAlarm = await hostWs.waitForMessage<QueueUpdateMessage>();
     expect(hostAfterAlarm.nowServing).toBeNull();
   expect(hostAfterAlarm.maxGuests).toBe(desiredMaxGuests);
+    expect(hostAfterAlarm.callDeadline ?? null).toBeNull();
 
     const guestRemoved = await guestWs.waitForMessage<GuestMessage>();
     expect(guestRemoved).toEqual({ type: 'removed', reason: 'no_show' });

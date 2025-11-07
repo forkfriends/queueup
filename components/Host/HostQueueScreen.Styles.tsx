@@ -116,6 +116,14 @@ const styles = StyleSheet.create({
   nowServingValue: {
     fontSize: 16,
   },
+  timerRow: {
+    marginTop: 4,
+  },
+  timerHint: {
+    marginTop: 6,
+    fontSize: 13,
+    color: '#666',
+  },
   queueCard: {
     flexGrow: 1,
     minHeight: 160,
