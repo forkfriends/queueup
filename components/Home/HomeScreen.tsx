@@ -10,6 +10,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 
 export default function HomeScreen({ navigation }: Props) {
   const handledPrefillRef = useRef(false);
+  const initialLoadDoneRef = useRef(false);
   const [activeQueues, setActiveQueues] = React.useState<Array<{
     code: string;
     sessionId: string;
@@ -21,32 +22,72 @@ export default function HomeScreen({ navigation }: Props) {
     createdAt: number;
   }>>([]);
 
+  const [joinedQueues, setJoinedQueues] = React.useState<Array<{
+    code: string;
+    sessionId: string;
+    partyId: string;
+    eventName?: string;
+    joinedAt: number;
+  }>>([]);
+
   // Check for active queue on mount and when returning to screen
-  const checkForActiveQueues = React.useCallback(async () => {
+  const checkForQueues = React.useCallback(async () => {
     try {
-      const storedQueues = await storage.getActiveQueues();
-      console.log('Checking for stored queues:', storedQueues.length ? `Found ${storedQueues.length}` : 'None found');
+      const [storedQueues, storedJoinedQueues] = await Promise.all([
+        storage.getActiveQueues(),
+        storage.getJoinedQueues()
+      ]);
+      
+      console.log(
+        'Checking for stored queues:',
+        storedQueues.length ? `Found ${storedQueues.length} hosted` : 'No hosted queues',
+        storedJoinedQueues.length ? `, ${storedJoinedQueues.length} joined` : ', no joined queues'
+      );
+      
       // Sort queues by creation time, newest first
       setActiveQueues(storedQueues.sort((a, b) => b.createdAt - a.createdAt));
+      setJoinedQueues(storedJoinedQueues.sort((a, b) => b.joinedAt - a.joinedAt));
     } catch (error) {
-      console.error('Error checking for active queues:', error);
+      console.error('Error checking for queues:', error);
       setActiveQueues([]);
+      setJoinedQueues([]);
     }
   }, []);
 
-  // Check on mount
+  // Load queues only once on mount
   React.useEffect(() => {
-    void checkForActiveQueues();
-  }, [checkForActiveQueues]);
+    if (!initialLoadDoneRef.current) {
+      void checkForQueues();
+      initialLoadDoneRef.current = true;
+    }
+  }, [checkForQueues]);
 
-  // Check when screen comes into focus
+  // Only reload queues when returning from GuestQueueScreen if storage has changed
   React.useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      void checkForActiveQueues();
+      // Check if the stored queues have changed
+      const checkStoredQueues = async () => {
+        try {
+          const storedJoinedQueues = await storage.getJoinedQueues();
+          const currentCodes = new Set(joinedQueues.map(q => q.code));
+          const storedCodes = new Set(storedJoinedQueues.map(q => q.code));
+          
+          // Only reload if the stored queues are different from our current state
+          if (storedCodes.size !== currentCodes.size || 
+              storedJoinedQueues.some(q => !currentCodes.has(q.code)) ||
+              joinedQueues.some(q => !storedCodes.has(q.code))) {
+            void checkForQueues();
+          }
+        } catch (error) {
+          console.warn('Error checking stored queues:', error);
+        }
+      };
+      
+      void checkStoredQueues();
     });
 
     return unsubscribe;
-  }, [navigation, checkForActiveQueues]);
+  }, [navigation, checkForQueues, joinedQueues]);
 
   useEffect(() => {
     if (handledPrefillRef.current) {
@@ -95,9 +136,30 @@ export default function HomeScreen({ navigation }: Props) {
           </Pressable>
         </View>
 
+        {joinedQueues.map((queue, index) => (
+          <Pressable
+            key={`joined-${queue.code}`}
+            style={[
+              styles.button,
+              styles.joinedButton,
+              index > 0 && styles.buttonSpacing
+            ]}
+            onPress={() => {
+              navigation.navigate('GuestQueueScreen', {
+                code: queue.code,
+                sessionId: queue.sessionId,
+                partyId: queue.partyId
+              });
+            }}>
+            <Text style={styles.joinedButtonText}>
+              Joined {queue.eventName ? `(${queue.eventName})` : queue.code}
+            </Text>
+          </Pressable>
+        ))}
+
         {activeQueues.map((queue, index) => (
           <Pressable
-            key={queue.code}
+            key={`host-${queue.code}`}
             style={[
               styles.button,
               styles.returnButton,

@@ -20,6 +20,7 @@ import {
   leaveQueue,
   savePushSubscription,
 } from '../../lib/backend';
+import { storage } from '../../utils/storage';
 import Timer from '../Timer';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
@@ -27,6 +28,22 @@ type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
 const MS_PER_MINUTE = 60 * 1000;
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
+    // Override the back button behavior to go to HomeScreen
+    useEffect(() => {
+        navigation.setOptions({
+            headerLeft: () => (
+                <Pressable
+                    onPress={() => navigation.navigate('HomeScreen')}
+                    style={({ pressed }) => [
+                        { opacity: pressed ? 0.7 : 1 },
+                        { marginLeft: 10 }
+                    ]}>
+                    <Text style={{ color: '#007AFF', fontSize: 17 }}>Home</Text>
+                </Pressable>
+            ),
+        });
+    }, [navigation]);
+
     const {
         code,
         partyId,
@@ -102,7 +119,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     }, []);
 
     const endSession = useCallback(
-        (message: string) => {
+        async (message: string) => {
       shouldReconnectRef.current = false;
       clearReconnect();
       closeActiveSocket();
@@ -110,8 +127,16 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       setIsActive(false);
       setStatusText(message);
       setCallDeadline(null);
+      // Remove the joined queue from storage when session ends
+      try {
+        if (code) {
+          await storage.removeJoinedQueue(code);
+        }
+      } catch (error) {
+        console.warn('Failed to remove joined queue from storage', error);
+      }
     },
-    [clearReconnect, closeActiveSocket]
+    [clearReconnect, closeActiveSocket, code]
   );
 
     useEffect(() => {
@@ -233,16 +258,23 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             }
         };
 
-        socket.onclose = (event) => {
+        socket.onclose = async (event) => {
             if (socketRef.current === socket) {
             socketRef.current = null;
             }
             setConnectionState('closed');
             if (shouldReconnectRef.current && event.code !== 1000) {
-            clearReconnect();
-            reconnectTimer.current = setTimeout(() => {
-                connect();
-            }, 2000);
+                clearReconnect();
+                reconnectTimer.current = setTimeout(() => {
+                    connect();
+                }, 2000);
+            } else if (!shouldReconnectRef.current && code) {
+                // If we're not reconnecting and this is a permanent closure, remove the joined queue
+                try {
+                    await storage.removeJoinedQueue(code);
+                } catch (error) {
+                    console.warn('Failed to remove joined queue from storage on socket close', error);
+                }
             }
         };
 
@@ -408,8 +440,16 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         setLeaveLoading(true);
         try {
         await leaveQueue({ code, partyId });
+        
+        // Remove from storage
+        try {
+          await storage.removeJoinedQueue(code);
+        } catch (storageError) {
+          console.warn('Failed to remove joined queue from storage', storageError);
+        }
+
         Alert.alert('Left queue', 'You have left the queue.');
-        navigation.replace('JoinQueueScreen', { id: 'return', code });
+        navigation.replace('HomeScreen');
         } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to leave queue';
         Alert.alert('Unable to leave queue', message);
