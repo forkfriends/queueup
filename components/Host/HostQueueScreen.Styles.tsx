@@ -343,6 +343,72 @@ const styles = StyleSheet.create({
   qrButtonDisabled: {
     opacity: 0.7,
   },
+  posterCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    backgroundColor: '#fff',
+    padding: 20,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  posterHeading: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+  },
+  posterHint: {
+    fontSize: 13,
+    color: '#555',
+    lineHeight: 18,
+  },
+  posterHintMuted: {
+    fontSize: 13,
+    color: '#888',
+  },
+  posterButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    flexWrap: 'wrap',
+  },
+  posterButton: {
+    flex: 1,
+    minWidth: 160,
+    backgroundColor: '#111',
+    paddingVertical: 12,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  posterButtonSecondary: {
+    flex: 1,
+    minWidth: 160,
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#d0d0d0',
+  },
+  posterButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  posterButtonSecondaryText: {
+    color: '#111',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  posterButtonDisabled: {
+    opacity: 0.65,
+  },
 });
 
 export default styles;

@@ -32,10 +32,42 @@ import { ArrowLeft } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
 import { trackEvent } from '../../utils/analytics';
+import { generatePosterImage } from './posterGenerator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
 const ANALYTICS_SCREEN = 'host_console';
+
+function formatTimeLabel(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 === 0 ? 12 : hours % 12;
+  const minuteString = minutes.toString().padStart(2, '0');
+  return `${displayHours}:${minuteString} ${period}`;
+}
+
+function formatScheduleLine(openTime?: string | null, closeTime?: string | null): string | null {
+  const openLabel = formatTimeLabel(openTime);
+  const closeLabel = formatTimeLabel(closeTime);
+  if (openLabel && closeLabel) {
+    return `${openLabel} – ${closeLabel}`;
+  }
+  if (openLabel) {
+    return `Opens ${openLabel}`;
+  }
+  if (closeLabel) {
+    return `Closes ${closeLabel}`;
+  }
+  return null;
+}
 
 type HostMessage =
   | {
@@ -91,10 +123,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     maxGuests: initialMaxGuests,
     location,
     contactInfo,
+    openTime,
+    closeTime,
   } = route.params;
   const storageKey = `queueup-host-auth:${sessionId}`;
 
   const displayEventName = eventName?.trim() || null;
+  const scheduleLine = useMemo(() => formatScheduleLine(openTime, closeTime), [openTime, closeTime]);
   const [capacity, setCapacity] = useState<number | null>(
     typeof initialMaxGuests === 'number' ? initialMaxGuests : null
   );
@@ -121,6 +156,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const [codeCopied, setCodeCopied] = useState(false);
   const isWeb = Platform.OS === 'web';
   const [savingQr, setSavingQr] = useState(false);
+  const [posterModeLoading, setPosterModeLoading] = useState<'color' | 'bw' | null>(null);
+  const canGeneratePoster = isWeb;
 
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -146,6 +183,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           maxGuests: initialMaxGuests,
           location,
           contactInfo,
+          openTime,
+          closeTime,
           createdAt: Date.now(),
         });
       } catch {
@@ -292,6 +331,29 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         ? 'Connecting…'
         : 'Disconnected';
   const shareableLink = joinUrl ?? null;
+  const buildPosterDetails = useCallback(() => {
+    const lines: string[] = [];
+    if (displayEventName) {
+      lines.push(displayEventName);
+    } else {
+      lines.push(`Queue ${code}`);
+    }
+    if (scheduleLine && !lines.includes(scheduleLine)) {
+      lines.push(scheduleLine);
+    }
+    if (typeof location === 'string' && location.trim().length > 0) {
+      lines.push(location.trim());
+    }
+    if (typeof contactInfo === 'string' && contactInfo.trim().length > 0) {
+      lines.push(contactInfo.trim());
+    } else if (typeof capacity === 'number') {
+      lines.push(`Max ${capacity} guests`);
+    } else if (!lines.some((line) => line.includes(code))) {
+      lines.push(`Code ${code}`);
+    }
+
+    return lines;
+  }, [capacity, code, contactInfo, displayEventName, location, scheduleLine, shareableLink]);
 
   const disabledAdvance =
     !hasHostAuth || actionLoading || closeLoading || closed || (queueCount === 0 && !nowServing);
@@ -621,6 +683,56 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     trackHostAction,
   ]);
 
+  const handleGeneratePoster = useCallback(
+    async (mode: 'color' | 'bw') => {
+      if (!canGeneratePoster || typeof window === 'undefined') {
+        Alert.alert('Try on web', 'Poster downloads are only available in a web browser.');
+        return;
+      }
+      if (posterModeLoading) {
+        return;
+      }
+      const doc = (globalThis as any)?.document;
+      if (!doc) {
+        Alert.alert('Unavailable', 'Poster downloads are only available in a web browser.');
+        return;
+      }
+      setPosterModeLoading(mode);
+      try {
+        const blob = await generatePosterImage({
+          slug: code,
+          joinUrl: shareableLink ?? undefined,
+          detailLines: buildPosterDetails(),
+          blackWhiteMode: mode === 'bw',
+        });
+        const objectUrl = URL.createObjectURL(blob);
+        const link = doc.createElement('a');
+        link.href = objectUrl;
+        const suffix = mode === 'bw' ? 'poster-bw' : 'poster';
+        link.download = `queue-${code}-${suffix}.png`;
+        doc.body.appendChild(link);
+        link.click();
+        doc.body.removeChild(link);
+        URL.revokeObjectURL(objectUrl);
+        Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
+        trackHostAction('poster_generated', {
+          mode,
+          platform: Platform.OS,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to generate poster';
+        Alert.alert('Poster failed', message);
+        trackHostAction('poster_failed', {
+          mode,
+          reason: message,
+        });
+      } finally {
+        setPosterModeLoading(null);
+      }
+    },
+    [buildPosterDetails, canGeneratePoster, code, posterModeLoading, shareableLink, trackHostAction]
+  );
+
   const performCloseQueue = useCallback(async () => {
     if (!hasHostAuth || closeLoading || !hostToken) {
       return;
@@ -753,6 +865,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         {typeof capacity === 'number' ? (
           <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
         ) : null}
+        {scheduleLine ? (
+          <Text style={styles.headerLine}>{scheduleLine}</Text>
+        ) : null}
         <View style={styles.headerCodeRow}>
           <Text style={styles.headerLine}>Queue code:</Text>
           <Text style={styles.headerCodeValue}>{code}</Text>
@@ -827,6 +942,47 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           </View>
         </View>
       ) : null}
+
+      <View style={styles.posterCard}>
+        <Text style={styles.posterHeading}>Printable Poster</Text>
+        <Text style={styles.posterHint}>
+          Generate a high-resolution PNG with your queue code and QR for printing or sharing.
+        </Text>
+        {canGeneratePoster ? (
+          <View style={styles.posterButtons}>
+            <Pressable
+              style={[
+                styles.posterButton,
+                posterModeLoading ? styles.posterButtonDisabled : undefined,
+              ]}
+              onPress={() => handleGeneratePoster('color')}
+              disabled={posterModeLoading !== null}>
+              {posterModeLoading === 'color' ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.posterButtonText}>Download Color</Text>
+              )}
+            </Pressable>
+            <Pressable
+              style={[
+                styles.posterButtonSecondary,
+                posterModeLoading ? styles.posterButtonDisabled : undefined,
+              ]}
+              onPress={() => handleGeneratePoster('bw')}
+              disabled={posterModeLoading !== null}>
+              {posterModeLoading === 'bw' ? (
+                <ActivityIndicator color="#111" />
+              ) : (
+                <Text style={styles.posterButtonSecondaryText}>Download B&W</Text>
+              )}
+            </Pressable>
+          </View>
+        ) : (
+          <Text style={styles.posterHintMuted}>
+            Open this host console on a web browser to download the printable poster.
+          </Text>
+        )}
+      </View>
 
       <View style={styles.queueActionsRow}>
         <Pressable

@@ -60,6 +60,12 @@ function formatTimeInputValue(date: Date): string {
   return `${hours}:${minutes}`;
 }
 
+function serializeTime(date: Date): string {
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
 export default function MakeQueueScreen({ navigation }: Props) {
   const [eventName, setEventName] = useState('');
   const [location, setLocation] = useState('');
@@ -207,6 +213,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
       hasTurnstile: Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY),
       turnstileTokenPresent: Boolean(turnstileToken),
     };
+    const openTimeValue = serializeTime(openTime);
+    const closeTimeValue = serializeTime(closeTime);
     void trackEvent('queue_create_started', {
       props: analyticsProps,
     });
@@ -220,6 +228,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
         maxGuests: normalizedMaxGuests,
         location: trimmedLocation || undefined,
         contactInfo: trimmedContact || undefined,
+        openTime: openTimeValue,
+        closeTime: closeTimeValue,
         turnstileToken: turnstileToken ?? undefined,
       });
       if (created.hostAuthToken) {
@@ -232,12 +242,14 @@ export default function MakeQueueScreen({ navigation }: Props) {
             wsUrl: created.wsUrl,
             hostAuthToken: created.hostAuthToken,
             joinUrl: created.joinUrl,
-            eventName: created.eventName,
-            maxGuests: created.maxGuests,
-            location: created.location ?? (trimmedLocation || undefined),
-            contactInfo: created.contactInfo ?? (trimmedContact || undefined),
-            createdAt: Date.now()
-          });
+          eventName: created.eventName,
+          maxGuests: created.maxGuests,
+          location: created.location ?? (trimmedLocation || undefined),
+          contactInfo: created.contactInfo ?? (trimmedContact || undefined),
+          openTime: created.openTime ?? openTimeValue,
+          closeTime: created.closeTime ?? closeTimeValue,
+          createdAt: Date.now()
+        });
         } catch (error) {
           console.warn('Failed to store queue details:', error);
         }
@@ -268,6 +280,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
         maxGuests: created.maxGuests ?? normalizedMaxGuests,
         location: created.location ?? (trimmedLocation || undefined),
         contactInfo: created.contactInfo ?? (trimmedContact || undefined),
+        openTime: created.openTime ?? openTimeValue,
+        closeTime: created.closeTime ?? closeTimeValue,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error creating queue';

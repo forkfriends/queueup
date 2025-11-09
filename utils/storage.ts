@@ -16,6 +16,8 @@ export type StoredQueue = {
   maxGuests?: number;
   location?: string | null;
   contactInfo?: string | null;
+  openTime?: string | null;
+  closeTime?: string | null;
   createdAt: number; // timestamp for sorting
 };
 

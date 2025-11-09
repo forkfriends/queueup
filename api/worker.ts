@@ -122,17 +122,27 @@ export default {
 
     // Track events (notif clicks, etc.)
     if (request.method === 'POST' && url.pathname === '/api/track') {
-      try {
-        const { sessionId, partyId, type, meta } = (await readJson(request)) ?? {};
-        if (!type) return applyCors(jsonError('type required', 400), corsOrigin);
-        await env.DB.prepare(
-          'INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, ?3, ?4)'
-        ).bind(sessionId ?? null, partyId ?? null, String(type), meta ? JSON.stringify(meta) : null).run();
-        return applyCors(new Response('ok'), corsOrigin);
-      } catch (e) {
-        console.error('track error', e);
-        return applyCors(new Response('fail', { status: 500 }), corsOrigin);
+      const payload = (await readJson(request)) ?? {};
+      const { sessionId, partyId, type, meta } = payload;
+      if (!type) {
+        return applyCors(jsonError('type required', 400), corsOrigin);
       }
+      try {
+        const insertResult = await env.DB.prepare(
+          'INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, ?3, ?4)'
+        ).bind(
+          sessionId ?? null,
+          partyId ?? null,
+          String(type),
+          meta ? JSON.stringify(meta) : null
+        ).run();
+        if (insertResult.error) {
+          console.warn('track insert warning', insertResult.error);
+        }
+      } catch (error) {
+        console.error('track error', error);
+      }
+      return applyCors(new Response('ok'), corsOrigin);
     }
 
     // Manual test push endpoint
@@ -456,6 +466,17 @@ function buildAppUrl(env: Env): string {
   }
 }
 
+function normalizeTimeString(value: string): string | null {
+  const trimmed = value.trim();
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(trimmed);
+  return match ? `${match[1]}:${match[2]}` : null;
+}
+
+function timeStringToMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map((part) => Number(part));
+  return hours * 60 + minutes;
+}
+
 async function handleCreate(
   request: Request,
   env: Env,
@@ -488,6 +509,32 @@ async function handleCreate(
         : '';
   const normalizedContactInfo =
     rawContactInfo.length > 0 ? rawContactInfo.slice(0, MAX_CONTACT_LENGTH) : null;
+
+  const rawOpenTime =
+    typeof (payload as any).openTime === 'string'
+      ? (payload as any).openTime.trim()
+      : '';
+  const normalizedOpenTime = rawOpenTime.length > 0 ? normalizeTimeString(rawOpenTime) : null;
+  if (rawOpenTime.length > 0 && !normalizedOpenTime) {
+    return jsonError('openTime must be in HH:mm format', 400);
+  }
+
+  const rawCloseTime =
+    typeof (payload as any).closeTime === 'string'
+      ? (payload as any).closeTime.trim()
+      : '';
+  const normalizedCloseTime = rawCloseTime.length > 0 ? normalizeTimeString(rawCloseTime) : null;
+  if (rawCloseTime.length > 0 && !normalizedCloseTime) {
+    return jsonError('closeTime must be in HH:mm format', 400);
+  }
+
+  if (normalizedOpenTime && normalizedCloseTime) {
+    const openMinutes = timeStringToMinutes(normalizedOpenTime);
+    const closeMinutes = timeStringToMinutes(normalizedCloseTime);
+    if (closeMinutes <= openMinutes) {
+      return jsonError('closeTime must be after openTime', 400);
+    }
+  }
 
   const rawMaxGuests = (payload as any).maxGuests;
   let maxGuests: number | null = null;
@@ -547,9 +594,18 @@ async function handleCreate(
   const shortCode = await generateUniqueCode(env);
 
   const insertResult = await env.DB.prepare(
-    "INSERT INTO sessions (id, short_code, status, event_name, max_guests, location, contact_info) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6)"
+    "INSERT INTO sessions (id, short_code, status, event_name, max_guests, location, contact_info, open_time, close_time) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8)"
   )
-    .bind(sessionId, shortCode, eventName, maxGuests, normalizedLocation, normalizedContactInfo)
+    .bind(
+      sessionId,
+      shortCode,
+      eventName,
+      maxGuests,
+      normalizedLocation,
+      normalizedContactInfo,
+      normalizedOpenTime,
+      normalizedCloseTime
+    )
     .run();
 
   if (insertResult.error) {
@@ -582,6 +638,8 @@ async function handleCreate(
     maxGuests,
     location: normalizedLocation,
     contactInfo: normalizedContactInfo,
+    openTime: normalizedOpenTime,
+    closeTime: normalizedCloseTime,
   });
 
   return new Response(body, { status: 200, headers });

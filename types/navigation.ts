@@ -12,6 +12,8 @@ export type RootStackParamList = {
     maxGuests?: number;
     location?: string | null;
     contactInfo?: string | null;
+    openTime?: string | null;
+    closeTime?: string | null;
   };
   GuestQueueScreen: {
     code: string;

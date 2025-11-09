@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Image, Pressable, Platform } from 'react-native';
 import { storage } from '../../utils/storage';
+import type { StoredQueue, StoredJoinedQueue } from '../../utils/storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
@@ -11,26 +12,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 export default function HomeScreen({ navigation }: Props) {
   const handledPrefillRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
-  const [activeQueues, setActiveQueues] = React.useState<Array<{
-    code: string;
-    sessionId: string;
-    wsUrl: string;
-    hostAuthToken: string;
-    joinUrl?: string;
-    eventName?: string;
-    maxGuests?: number;
-    location?: string | null;
-    contactInfo?: string | null;
-    createdAt: number;
-  }>>([]);
+  const [activeQueues, setActiveQueues] = React.useState<StoredQueue[]>([]);
 
-  const [joinedQueues, setJoinedQueues] = React.useState<Array<{
-    code: string;
-    sessionId: string;
-    partyId: string;
-    eventName?: string;
-    joinedAt: number;
-  }>>([]);
+  const [joinedQueues, setJoinedQueues] = React.useState<StoredJoinedQueue[]>([]);
 
   // Check for active queue on mount and when returning to screen
   const checkForQueues = React.useCallback(async () => {
@@ -169,17 +153,19 @@ export default function HomeScreen({ navigation }: Props) {
               index > 0 && styles.returnButtonSpacing
             ]}
             onPress={() => {
-              navigation.navigate('HostQueueScreen', {
-                code: queue.code,
-                sessionId: queue.sessionId,
-                wsUrl: queue.wsUrl,
-                hostAuthToken: queue.hostAuthToken,
-                joinUrl: queue.joinUrl,
-                eventName: queue.eventName,
-                maxGuests: queue.maxGuests,
-                location: queue.location,
-                contactInfo: queue.contactInfo,
-              });
+            navigation.navigate('HostQueueScreen', {
+              code: queue.code,
+              sessionId: queue.sessionId,
+              wsUrl: queue.wsUrl,
+              hostAuthToken: queue.hostAuthToken,
+              joinUrl: queue.joinUrl,
+              eventName: queue.eventName,
+              maxGuests: queue.maxGuests,
+              location: queue.location,
+              contactInfo: queue.contactInfo,
+              openTime: queue.openTime,
+              closeTime: queue.closeTime,
+            });
             }}>
             <Text style={styles.buttonText}>
               View {queue.eventName ? `(${queue.eventName})` : queue.code}

@@ -50,4 +50,11 @@ await applyD1Migrations(env.DB, [
       `ALTER TABLE sessions ADD COLUMN contact_info TEXT;`,
     ],
   },
+  {
+    name: '006_add_open_hours.sql',
+    queries: [
+      `ALTER TABLE sessions ADD COLUMN open_time TEXT;`,
+      `ALTER TABLE sessions ADD COLUMN close_time TEXT;`,
+    ],
+  },
 ]);
