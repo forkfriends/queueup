@@ -105,7 +105,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
     (isSearchingLocations
       ? 'Searching nearby places…'
       : !location
-        ? 'Start typing to search for a venue near you.'
+        ? ''
         : hasMinimumLocationQuery && shouldShowLocationSuggestions
           ? 'Tap a result below to autofill the location.'
           : hasMinimumLocationQuery
@@ -650,7 +650,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
             {/* Contact Info */}
             <Text style={styles.label}>Contact Info</Text>
             <TextInput
-              placeholder="Value"
+              placeholder="Enter your contact information"
               value={contact}
               onChangeText={setContact}
               style={[styles.input, styles.textArea]}
