@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { storage } from '../../utils/storage';
 import {
   ScrollView,
@@ -19,6 +19,7 @@ import DateTimePicker, {
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Turnstile } from '@marsidev/react-turnstile';
+import * as Location from 'expo-location';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
 import { createQueue } from '../../lib/backend';
@@ -28,8 +29,19 @@ type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 100;
 const DEFAULT_QUEUE_SIZE = 20;
+const MAPBOX_GEOCODING_URL = 'https://api.mapbox.com/geocoding/v5/mapbox.places';
+const MAPBOX_SEARCH_DEBOUNCE_MS = 400;
+const MIN_LOCATION_QUERY_LENGTH = 3;
+const MAPBOX_TOKEN =
+  (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN : undefined) ?? '';
 
 type TimeField = 'open' | 'close';
+type LocationSuggestion = {
+  id: string;
+  primaryText: string;
+  secondaryText?: string;
+  fullText: string;
+};
 
 function createTime(hours: number, minutes = 0): Date {
   const base = new Date();
@@ -61,6 +73,13 @@ function formatTimeInputValue(date: Date): string {
 export default function MakeQueueScreen({ navigation }: Props) {
   const [eventName, setEventName] = useState('');
   const [location, setLocation] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+  const [isSearchingLocations, setIsSearchingLocations] = useState(false);
+  const [locationSearchError, setLocationSearchError] = useState<string | null>(null);
+  const [locationInputFocused, setLocationInputFocused] = useState(false);
+  const [deviceCoords, setDeviceCoords] = useState<Location.LocationObjectCoords | null>(null);
+  const [locationPermissionStatus, setLocationPermissionStatus] =
+    useState<Location.PermissionStatus | null>(null);
   const [maxSize, setMaxSize] = useState<number>(DEFAULT_QUEUE_SIZE);
   const [activePicker, setActivePicker] = useState<TimeField | null>(null);
   const [openTime, setOpenTime] = useState(() => createTime(9));
@@ -68,8 +87,212 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const [contact, setContact] = useState('');
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const turnstileRef = React.useRef<any>(null);
+  const turnstileRef = useRef<any>(null);
+  const locationSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const locationBlurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const locationSearchAbortRef = useRef<AbortController | null>(null);
+  const isSelectingLocationRef = useRef<boolean>(false);
+  const isMapboxEnabled = Boolean(MAPBOX_TOKEN);
   const isWeb = Platform.OS === 'web';
+  const hasMinimumLocationQuery = location.trim().length >= MIN_LOCATION_QUERY_LENGTH;
+  const shouldShowLocationSuggestions =
+    isMapboxEnabled &&
+    hasMinimumLocationQuery &&
+    (locationInputFocused || Platform.OS === 'web') &&
+    (locationSuggestions.length > 0 || isSearchingLocations);
+  const resolvedLocationHelperText =
+    locationSearchError ??
+    (isSearchingLocations
+      ? 'Searching nearby places…'
+      : !location
+        ? ''
+        : hasMinimumLocationQuery && shouldShowLocationSuggestions
+          ? 'Tap a result below to autofill the location.'
+          : hasMinimumLocationQuery
+            ? ''
+            : `Enter at least ${MIN_LOCATION_QUERY_LENGTH} characters to search nearby places.`);
+  const showLocationPermissionHint = locationPermissionStatus === 'denied';
+
+  const ensureDeviceCoords =
+    useCallback(async (): Promise<Location.LocationObjectCoords | null> => {
+      if (deviceCoords) {
+        return deviceCoords;
+      }
+      if (!isMapboxEnabled) {
+        return null;
+      }
+      if (locationPermissionStatus === 'denied') {
+        return null;
+      }
+      try {
+        const permissionResponse = await Location.requestForegroundPermissionsAsync();
+        setLocationPermissionStatus(permissionResponse.status);
+        if (permissionResponse.status !== 'granted') {
+          return null;
+        }
+
+        const lastKnown = await Location.getLastKnownPositionAsync({});
+        if (lastKnown?.coords) {
+          setDeviceCoords(lastKnown.coords);
+          return lastKnown.coords;
+        }
+
+        const current = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        setDeviceCoords(current.coords);
+        return current.coords;
+      } catch (error) {
+        console.warn('[QueueUp][Location] Unable to determine host position', error);
+        return null;
+      }
+    }, [deviceCoords, isMapboxEnabled, locationPermissionStatus]);
+
+  const handleLocationFocus = useCallback(() => {
+    if (locationBlurTimeoutRef.current) {
+      clearTimeout(locationBlurTimeoutRef.current);
+      locationBlurTimeoutRef.current = null;
+    }
+    setLocationInputFocused(true);
+  }, []);
+
+  const handleLocationBlur = useCallback(() => {
+    locationBlurTimeoutRef.current = setTimeout(() => {
+      setLocationInputFocused(false);
+    }, 150);
+  }, []);
+
+  const handleLocationSuggestionPress = useCallback((suggestion: LocationSuggestion) => {
+    isSelectingLocationRef.current = true;
+    setLocation(suggestion.fullText);
+    setLocationSuggestions([]);
+    setLocationSearchError(null);
+    setLocationInputFocused(false);
+    // Reset the flag after a brief delay to allow state updates to complete
+    setTimeout(() => {
+      isSelectingLocationRef.current = false;
+    }, 100);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (locationSearchTimeoutRef.current) {
+        clearTimeout(locationSearchTimeoutRef.current);
+        locationSearchTimeoutRef.current = null;
+      }
+      if (locationBlurTimeoutRef.current) {
+        clearTimeout(locationBlurTimeoutRef.current);
+        locationBlurTimeoutRef.current = null;
+      }
+      if (locationSearchAbortRef.current) {
+        locationSearchAbortRef.current.abort();
+        locationSearchAbortRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMapboxEnabled) {
+      setLocationSuggestions([]);
+      setIsSearchingLocations(false);
+      return;
+    }
+
+    // Skip search if location was set programmatically (from selection)
+    if (isSelectingLocationRef.current) {
+      return;
+    }
+
+    const trimmedQuery = location.trim();
+    if (trimmedQuery.length < MIN_LOCATION_QUERY_LENGTH) {
+      setLocationSuggestions([]);
+      setLocationSearchError(null);
+      setIsSearchingLocations(false);
+      if (locationSearchTimeoutRef.current) {
+        clearTimeout(locationSearchTimeoutRef.current);
+        locationSearchTimeoutRef.current = null;
+      }
+      if (locationSearchAbortRef.current) {
+        locationSearchAbortRef.current.abort();
+        locationSearchAbortRef.current = null;
+      }
+      return;
+    }
+
+    if (locationSearchTimeoutRef.current) {
+      clearTimeout(locationSearchTimeoutRef.current);
+    }
+
+    const controller = new AbortController();
+    if (locationSearchAbortRef.current) {
+      locationSearchAbortRef.current.abort();
+    }
+    locationSearchAbortRef.current = controller;
+
+    const timeoutId = setTimeout(async () => {
+      setIsSearchingLocations(true);
+      setLocationSearchError(null);
+      try {
+        let proximityParam = '';
+        const coords = await ensureDeviceCoords();
+        if (coords) {
+          proximityParam = `&proximity=${coords.longitude},${coords.latitude}`;
+        }
+        const response = await fetch(
+          `${MAPBOX_GEOCODING_URL}/${encodeURIComponent(trimmedQuery)}.json?autocomplete=true&language=en&limit=6${proximityParam}&access_token=${MAPBOX_TOKEN}`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          throw new Error(`Mapbox search failed (${response.status})`);
+        }
+        const data = await response.json();
+        const features = Array.isArray(data?.features) ? data.features : [];
+        const mapped: LocationSuggestion[] = features.map((feature: any) => {
+          const primary = feature?.text ?? feature?.place_name ?? trimmedQuery;
+          const fullText = feature?.place_name ?? primary;
+          let secondary: string | undefined;
+          if (fullText && primary && fullText.startsWith(primary)) {
+            secondary = fullText.slice(primary.length).replace(/^,\s*/, '');
+          } else if (fullText && fullText !== primary) {
+            secondary = fullText;
+          }
+          return {
+            id: feature?.id ?? fullText ?? primary,
+            primaryText: primary,
+            secondaryText: secondary,
+            fullText,
+          };
+        });
+        setLocationSuggestions(mapped);
+        if (!mapped.length) {
+          setLocationSearchError('No matching places found nearby.');
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.warn('[QueueUp][Location] Search failed', error);
+        setLocationSearchError('Unable to search locations right now.');
+        setLocationSuggestions([]);
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingLocations(false);
+        }
+      }
+    }, MAPBOX_SEARCH_DEBOUNCE_MS);
+    locationSearchTimeoutRef.current = timeoutId;
+
+    return () => {
+      controller.abort();
+      if (locationSearchAbortRef.current === controller) {
+        locationSearchAbortRef.current = null;
+      }
+      if (locationSearchTimeoutRef.current === timeoutId) {
+        clearTimeout(timeoutId);
+        locationSearchTimeoutRef.current = null;
+      }
+    };
+  }, [ensureDeviceCoords, isMapboxEnabled, location]);
 
   const applyTimeChange = useCallback(
     (field: TimeField, selected: Date) => {
@@ -219,7 +442,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
             joinUrl: created.joinUrl,
             eventName: created.eventName,
             maxGuests: created.maxGuests,
-            createdAt: Date.now()
+            createdAt: Date.now(),
           });
         } catch (error) {
           console.warn('Failed to store queue details:', error);
@@ -270,11 +493,10 @@ export default function MakeQueueScreen({ navigation }: Props) {
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', android: undefined })}
         style={{ flex: 1 }}>
-        <ScrollView 
-          contentContainerStyle={styles.scroll} 
+        <ScrollView
+          contentContainerStyle={styles.scroll}
           style={{ flex: 1 }}
-          keyboardShouldPersistTaps="handled"
-        >
+          keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Make Queue</Text>
 
           <View style={styles.card}>
@@ -291,12 +513,75 @@ export default function MakeQueueScreen({ navigation }: Props) {
             {/* Location */}
             <Text style={styles.label}>Location</Text>
             <TextInput
-              placeholder="Value"
+              placeholder={
+                isMapboxEnabled ? 'Search for a venue or address' : 'Add a short location note'
+              }
               value={location}
-              onChangeText={setLocation}
+              onChangeText={(text) => {
+                setLocation(text);
+                setLocationSearchError(null);
+              }}
               style={styles.input}
-              returnKeyType="next"
+              returnKeyType="search"
+              onFocus={handleLocationFocus}
+              onBlur={handleLocationBlur}
+              autoCapitalize="words"
             />
+            {isMapboxEnabled ? (
+              <>
+                <View style={styles.locationHelperRow}>
+                  {isSearchingLocations ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#1f6feb"
+                      style={styles.locationSearchSpinner}
+                    />
+                  ) : null}
+                  <Text style={styles.locationHelperText} numberOfLines={2}>
+                    {resolvedLocationHelperText}
+                  </Text>
+                </View>
+                {shouldShowLocationSuggestions ? (
+                  <View style={styles.locationSuggestionList}>
+                    {locationSuggestions.map((suggestion, index) => (
+                      <Pressable
+                        key={suggestion.id}
+                        style={[
+                          styles.locationSuggestion,
+                          index === 0 ? styles.locationSuggestionFirst : undefined,
+                        ]}
+                        onPress={() => handleLocationSuggestionPress(suggestion)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use ${suggestion.fullText}`}>
+                        <Text style={styles.locationSuggestionPrimary}>
+                          {suggestion.primaryText}
+                        </Text>
+                        {suggestion.secondaryText ? (
+                          <Text style={styles.locationSuggestionSecondary}>
+                            {suggestion.secondaryText}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    ))}
+                    {!isSearchingLocations &&
+                    !locationSuggestions.length &&
+                    hasMinimumLocationQuery &&
+                    !locationSearchError ? (
+                      <Text style={styles.locationSuggestionEmpty}>No nearby matches yet.</Text>
+                    ) : null}
+                  </View>
+                ) : null}
+                {showLocationPermissionHint ? (
+                  <Text style={styles.locationPermissionHint}>
+                    Enable location permissions in system settings to prioritize nearby matches.
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <Text style={styles.locationHelperText}>
+                Set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` to enable map-powered search.
+              </Text>
+            )}
 
             {/* Max Queue Size */}
             <Text style={styles.label}>Max Queue Size</Text>
@@ -365,7 +650,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
             {/* Contact Info */}
             <Text style={styles.label}>Contact Info</Text>
             <TextInput
-              placeholder="Value"
+              placeholder="Enter your contact information"
               value={contact}
               onChangeText={setContact}
               style={[styles.input, styles.textArea]}
@@ -404,7 +689,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
             ) : null}
 
             {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
-              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+              <Text
+                style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
                 Complete the verification above to create queue
               </Text>
             ) : null}
@@ -413,12 +699,14 @@ export default function MakeQueueScreen({ navigation }: Props) {
             <Pressable
               style={[
                 styles.button,
-                (loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken))
+                loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)
                   ? styles.buttonDisabled
-                  : undefined
+                  : undefined,
               ]}
               onPress={onSubmit}
-              disabled={loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}>
+              disabled={
+                loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)
+              }>
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
