@@ -14,6 +14,7 @@ import {
   type GestureResponderEvent,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import { captureRef } from 'react-native-view-shot';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as FileSystem from 'expo-file-system';
@@ -46,10 +47,6 @@ type HostMessage =
 type ConnectionState = 'connecting' | 'open' | 'closed';
 
 const RECONNECT_DELAY_MS = 3000;
-
-type QRCodeRef = {
-  toDataURL?: (callback: (data: string) => void) => void;
-};
 
 type MediaPermissionOutcome =
   | { status: 'granted'; access: MediaLibrary.PermissionResponse['accessPrivileges'] | undefined }
@@ -97,7 +94,7 @@ export default function HostQueueScreen({ route }: Props) {
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const qrCodeRef = useRef<QRCodeRef | null>(null);
+  const qrPosterRef = useRef<View | null>(null);
 
   useEffect(() => {
     if (!initialHostAuthToken) {
@@ -346,57 +343,37 @@ export default function HostQueueScreen({ route }: Props) {
     }
   }, [code, shareableLink]);
 
+  const captureQrPoster = useCallback(async (): Promise<string> => {
+    if (!qrPosterRef.current) {
+      throw new Error('QR poster unavailable. Wait a moment and try again.');
+    }
+    return captureRef(qrPosterRef.current, {
+      format: 'png',
+      quality: 1,
+      result: 'base64',
+    });
+  }, []);
+
   const handleSaveQr = useCallback(async () => {
-    if (!shareableLink || !qrCodeRef.current || savingQr) {
-      if (!qrCodeRef.current) {
-        Alert.alert('QR unavailable', 'Generate the QR code again and try saving.');
-      }
+    if (!shareableLink || savingQr) {
+      return;
+    }
+    if (!qrPosterRef.current) {
+      Alert.alert('QR unavailable', 'Generate the QR code again and try saving.');
       return;
     }
 
     if (isWeb) {
       setSavingQr(true);
       try {
-        if (typeof qrCodeRef.current?.toDataURL !== 'function') {
-          throw new Error('Saving QR codes is not supported on this browser.');
-        }
-
-        const base64 = await new Promise<string>((resolve, reject) => {
-          let settled = false;
-          const timeout = setTimeout(() => {
-            if (!settled) {
-              settled = true;
-              reject(new Error('Timed out generating QR image data.'));
-            }
-          }, 3000);
-
-          try {
-            qrCodeRef.current?.toDataURL?.((data: string) => {
-              if (settled) return;
-              settled = true;
-              clearTimeout(timeout);
-              resolve(data);
-            });
-          } catch (err) {
-            if (!settled) {
-              settled = true;
-              clearTimeout(timeout);
-              reject(err);
-            }
-          }
-        });
-
+        const base64 = await captureQrPoster();
         const dataUrl = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href = objectUrl;
+        link.href = dataUrl;
         link.download = `queue-${code}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        URL.revokeObjectURL(objectUrl);
         Alert.alert('Saved', 'QR code downloaded. Check your browser downloads.');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to download QR code.';
@@ -460,48 +437,25 @@ export default function HostQueueScreen({ route }: Props) {
     const canManageAlbums = accessLevel === 'all';
 
     setSavingQr(true);
+    let tempFileUri: string | null = null;
     try {
-      if (typeof qrCodeRef.current?.toDataURL !== 'function') {
-        throw new Error('Saving QR codes is not supported on this device.');
+      const base64 = await captureQrPoster();
+      const normalizedBase64 = base64.includes(',')
+        ? base64.split(',')[1]?.trim() ?? ''
+        : base64.trim();
+      if (!normalizedBase64) {
+        throw new Error('QR capture failed. Try again.');
       }
 
-      const base64 = await new Promise<string>((resolve, reject) => {
-        let settled = false;
-        const timeout = setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            reject(new Error('Timed out generating QR image data.'));
-          }
-        }, 3000);
-
-        try {
-          qrCodeRef.current?.toDataURL?.((data: string) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeout);
-            resolve(data);
-          });
-        } catch (err) {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timeout);
-            reject(err);
-          }
-        }
-      });
-
-      // Prefer cacheDirectory for temporary storage of the QR code image before moving it to the user's photo library.
-      // cacheDirectory is used because the file only needs to persist long enough to be imported into MediaLibrary,
-      // and using cacheDirectory avoids cluttering documentDirectory with temporary files.
-      // If cacheDirectory is unavailable, fall back to documentDirectory.
       const directory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
       if (!directory) {
         throw new Error('No writable directory available to save the QR code.');
       }
-      const fileUri = `${directory}queue-${code}.png`;
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
+      tempFileUri = `${directory}queue-${code}.png`;
+      await FileSystem.writeAsStringAsync(tempFileUri, normalizedBase64, {
         encoding: FileSystem.EncodingType.Base64,
       });
+      const fileUri = tempFileUri.startsWith('file://') ? tempFileUri : `file://${tempFileUri}`;
       if (!canManageAlbums) {
         await MediaLibrary.saveToLibraryAsync(fileUri);
       } else {
@@ -532,8 +486,16 @@ export default function HostQueueScreen({ route }: Props) {
       Alert.alert('Save failed', message);
     } finally {
       setSavingQr(false);
+      if (tempFileUri) {
+        try {
+          await FileSystem.deleteAsync(tempFileUri, { idempotent: true });
+        } catch (cleanupError) {
+          console.warn('Failed to delete temporary QR capture', cleanupError);
+        }
+      }
     }
   }, [
+    captureQrPoster,
     code,
     getMediaPermission,
     isWeb,
@@ -706,16 +668,24 @@ export default function HostQueueScreen({ route }: Props) {
       {shareableLink ? (
         <View style={styles.qrCard}>
           <Text style={styles.qrHeading}>Guest QR Code</Text>
-          <View style={styles.qrCodeWrapper}>
-            <QRCode
-              value={shareableLink}
-              size={180}
-              getRef={(ref) => {
-                qrCodeRef.current = ref;
-              }}
-            />
+          <View ref={qrPosterRef} style={styles.qrPoster} collapsable={false}>
+            <Text style={styles.qrPosterBadge}>Guest check-in</Text>
+            <Text style={styles.qrPosterTitle}>{displayEventName ?? 'Your restaurant'}</Text>
+            <Text style={styles.qrPosterSubtitle}>Scan to join the virtual queue!</Text>
+            <View style={styles.qrCodeWrapper}>
+              <QRCode
+                value={shareableLink}
+                size={196}
+                quietZone={10}
+                color="#0f172a"
+                backgroundColor="#fff"
+              />
+            </View>
+            <View style={styles.qrPosterCodeBlock}>
+              <Text style={styles.qrPosterCodeLabel}>Queue code</Text>
+              <Text style={styles.qrPosterCodeValue}>{code}</Text>
+            </View>
           </View>
-          <Text style={styles.qrHint}>Have guests scan to join instantly.</Text>
           <View style={styles.qrActions}>
             <Pressable style={styles.qrShareButton} onPress={handleShareQr}>
               <Text style={styles.qrShareText}>Share QR Link</Text>
