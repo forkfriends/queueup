@@ -201,7 +201,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
               const reason = data.reason;
               const reasonMessages: Record<string, string> = {
                 served: 'All set! You have been marked as served.',
-                no_show: "We couldn't reach you, so you were removed from the queue.",
+                no_show:
+                  "Time ran out before you could check in, so we had to release your spot.",
                 kicked: 'The host removed you from the queue.',
                 closed: 'Queue closed. Thanks for your patience!',
                 left: 'You have left the queue.',
@@ -214,6 +215,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
               setQueueLength(null);
               setEstimatedWaitMs(null);
               setCallDeadline(null);
+              setCalled(false);
               endSession(message);
               break;
             }
@@ -539,59 +541,82 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
             <View style={styles.card}>
             <View style={styles.codeBadge}>
+              <View style={styles.codeBadgeTextGroup}>
                 <Text style={styles.codeBadgeLabel}>Queue Code</Text>
                 <Text style={styles.codeBadgeValue}>{code}</Text>
+              </View>
+              <View
+                style={[
+                  styles.codeBadgeStatus,
+                  isActive ? styles.codeBadgeStatusActive : styles.codeBadgeStatusComplete,
+                ]}>
+                <Text
+                  style={[
+                    styles.codeBadgeStatusText,
+                    isActive
+                      ? styles.codeBadgeStatusTextActive
+                      : styles.codeBadgeStatusTextComplete,
+                  ]}>
+                  {isActive ? 'Active' : 'Finished'}
+                </Text>
+              </View>
             </View>
             <Text style={styles.statusText}>{statusText}</Text>
             {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
-            <Text style={styles.connectionText}>{connectionLabel}</Text>
-          {called ? <Text style={styles.calledText}>It’s your turn!</Text> : null}
-          {called ? (
-            <View style={styles.timerRow}>
-              <Timer targetTimestamp={callDeadline} label="Time left" compact />
-            </View>
-          ) : null}
-            {isWeb && isActive ? (
-                <Pressable
-                style={[styles.pushButton, pushReady ? styles.pushButtonActive : undefined]}
-                onPress={() => enablePush()}
-                disabled={pushReady}>
-                <Text
-                    style={[styles.pushButtonText, pushReady ? styles.pushButtonTextActive : undefined]}>
-                    {pushReady ? 'Notifications On' : 'Enable Browser Alerts'}
-                </Text>
-                </Pressable>
+            {isActive ? (
+              <>
+                <Text style={styles.connectionText}>{connectionLabel}</Text>
+                {called ? <Text style={styles.calledText}>It’s your turn!</Text> : null}
+                {called ? (
+                  <View style={styles.timerRow}>
+                    <Timer targetTimestamp={callDeadline} label="Time left" compact />
+                  </View>
+                ) : null}
+                {isWeb ? (
+                  <Pressable
+                    style={[styles.pushButton, pushReady ? styles.pushButtonActive : undefined]}
+                    onPress={() => enablePush()}
+                    disabled={pushReady}>
+                    <Text
+                      style={[styles.pushButtonText, pushReady ? styles.pushButtonTextActive : undefined]}>
+                      {pushReady ? 'Notifications On' : 'Enable Browser Alerts'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {pushMessage ? <Text style={styles.metaText}>{pushMessage}</Text> : null}
+              </>
             ) : null}
-            {pushMessage ? <Text style={styles.metaText}>{pushMessage}</Text> : null}
             </View>
 
-            <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Queue Metrics</Text>
-            <View style={styles.metricsGrid}>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Your Position</Text>
-                <Text style={styles.metricValue}>
-                    {typeof position === 'number' ? `#${position}` : '—'}
-                </Text>
+            {isActive ? (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Queue Metrics</Text>
+                <View style={styles.metricsGrid}>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Your Position</Text>
+                    <Text style={styles.metricValue}>
+                      {typeof position === 'number' ? `#${position}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Ahead of You</Text>
+                    <Text style={styles.metricValue}>
+                      {aheadDisplay != null ? `${aheadDisplay}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Queue Size</Text>
+                    <Text style={styles.metricValue}>
+                      {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Est. Wait</Text>
+                    <Text style={styles.metricValue}>{etaText}</Text>
+                  </View>
                 </View>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Ahead of You</Text>
-                <Text style={styles.metricValue}>
-                    {aheadDisplay != null ? `${aheadDisplay}` : '—'}
-                </Text>
-                </View>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Queue Size</Text>
-                <Text style={styles.metricValue}>
-                    {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
-                </Text>
-                </View>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Est. Wait</Text>
-                <Text style={styles.metricValue}>{etaText}</Text>
-                </View>
-            </View>
-            </View>
+              </View>
+            ) : null}
 
             <View style={styles.card}>
             <Text style={styles.sectionTitle}>Your Party</Text>

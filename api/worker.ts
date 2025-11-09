@@ -24,6 +24,8 @@ export interface Env {
 }
 
 const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/queueup/';
+const MS_PER_MINUTE = 60 * 1000;
+const FALLBACK_CALL_WINDOW_MINUTES = 2;
 
 const ROUTE =
   /^\/api\/queue(?:\/(create|[A-Za-z0-9]{6})(?:\/(join|declare-nearby|leave|advance|kick|close|connect|snapshot))?)?$/;
@@ -221,11 +223,22 @@ export default {
         if (event.partyId) {
           switch (event.type) {
             case 'QUEUE_MEMBER_CALLED':
-              await sendPushToParty(env, event.sessionId, event.partyId, {
-                title: "It's your turn!",
-                body: `Please confirm within ${Math.floor((event.deadline ?? 0) / 60000)} minutes.`,
-                kind: 'called',
-              });
+              {
+                const msRemaining =
+                  typeof event.deadline === 'number'
+                    ? Math.max(event.deadline - Date.now(), 0)
+                    : FALLBACK_CALL_WINDOW_MINUTES * MS_PER_MINUTE;
+                const minutesRemaining = Math.max(
+                  1,
+                  Math.ceil(msRemaining / MS_PER_MINUTE)
+                );
+                const minuteLabel = minutesRemaining === 1 ? 'minute' : 'minutes';
+                await sendPushToParty(env, event.sessionId, event.partyId, {
+                  title: "It's your turn!",
+                  body: `Please confirm within ${minutesRemaining} ${minuteLabel}.`,
+                  kind: 'called',
+                });
+              }
               break;
 
             case 'QUEUE_POSITION_2':

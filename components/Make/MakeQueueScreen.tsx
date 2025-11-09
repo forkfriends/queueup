@@ -396,7 +396,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
                     console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
                   }}
                   options={{
-                    theme: 'auto',
+                    theme: 'light',
                     size: 'normal',
                   }}
                 />

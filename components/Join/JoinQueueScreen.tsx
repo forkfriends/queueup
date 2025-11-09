@@ -502,6 +502,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setLeaveLoading(true);
     try {
       await leaveQueue({ code: joinedCode, partyId });
+      await poll();
       resetSession('You have left the queue.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave queue';
@@ -510,7 +511,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       setLeaveConfirmVisibleWeb(false);
       setLeaveLoading(false);
     }
-  }, [joinedCode, partyId, resetSession]);
+  }, [joinedCode, partyId, poll, resetSession]);
 
   const cancelLeaveWeb = useCallback(() => {
     if (leaveLoading) {
@@ -640,7 +641,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
                     console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
                   }}
                   options={{
-                    theme: 'auto',
+                    theme: 'light',
                     size: 'normal',
                   }}
                 />

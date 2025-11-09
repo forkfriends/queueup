@@ -304,6 +304,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           setCallDeadline(null);
         }
         setConnectionError(null);
+        await poll();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to advance queue';
         Alert.alert('Unable to advance', message);
@@ -311,7 +312,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setActionLoading(false);
       }
     },
-    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id]
+    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id, poll]
   );
 
   const advanceSpecific = useCallback(
@@ -598,13 +599,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       } catch (err) {
         console.warn('Failed to remove host auth from storage after close', err);
       }
+      await poll();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to close queue';
       Alert.alert('Unable to close queue', message);
     } finally {
       setCloseLoading(false);
     }
-  }, [closeLoading, code, hasHostAuth, hostToken]);
+  }, [closeLoading, code, hasHostAuth, hostToken, poll]);
 
   const handleCloseQueue = useCallback(() => {
     if (!hasHostAuth || closeLoading) {
