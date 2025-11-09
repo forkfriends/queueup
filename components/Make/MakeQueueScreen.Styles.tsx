@@ -41,6 +41,57 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
   },
+  locationHelperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  locationHelperText: {
+    fontSize: 13,
+    color: '#555',
+    flex: 1,
+  },
+  locationSearchSpinner: {
+    marginRight: 8,
+  },
+  locationSuggestionList: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#e2e2e2',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  locationSuggestion: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f1f1',
+  },
+  locationSuggestionFirst: {
+    borderTopWidth: 0,
+  },
+  locationSuggestionPrimary: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111',
+  },
+  locationSuggestionSecondary: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  locationSuggestionEmpty: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 13,
+    color: '#666',
+  },
+  locationPermissionHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#8a5300',
+  },
   sliderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   sliderHint: {
     fontSize: 15,

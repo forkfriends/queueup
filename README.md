@@ -33,6 +33,9 @@ QueueUp is a real-time queueing companion for pop-up events, meet-and-greets, an
 - __Configure the API base URL:__ Set `EXPO_PUBLIC_API_BASE_URL` in `.env` (or your shell) to your deployed Worker origin, e.g.  
    `EXPO_PUBLIC_API_BASE_URL=https://queueup-api.example.workers.dev`  
    When unset, the app points at `http://localhost:8787` (`127.0.0.1` on iOS simulators, `10.0.2.2` on Android emulators) to match Wrangler's dev tunnel.
+- __Enable location search (optional, recommended):__ Generate a Mapbox access token with the Geocoding API enabled and set  
+  `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.YourTokenHere`  
+  Hosts can then search for nearby venues on the Make Queue screen, powered by Mapbox's place data and the device's current location (via Expo Location).
 
 ## change
 
