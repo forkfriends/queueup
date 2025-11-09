@@ -28,10 +28,14 @@ import {
   buildHostConnectUrl,
 } from '../../lib/backend';
 import { Feather } from '@expo/vector-icons';
+import { ArrowLeft } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
+import { trackEvent } from '../../utils/analytics';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
+
+const ANALYTICS_SCREEN = 'host_console';
 
 type HostMessage =
   | {
@@ -63,11 +67,15 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       headerLeft: () => (
         <Pressable
           onPress={() => navigation.navigate('HomeScreen')}
-          style={({ pressed }) => [
-            { opacity: pressed ? 0.7 : 1 },
-            { marginLeft: 10 }
-          ]}>
-          <Text style={{ color: '#007AFF', fontSize: 17 }}>Home</Text>
+          accessibilityRole="button"
+          accessibilityLabel="Go home"
+          hitSlop={12}
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.6 : 1,
+            padding: 8,
+            marginLeft: 8,
+          })}>
+          <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
         </Pressable>
       ),
     });
@@ -285,6 +293,20 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     !hasHostAuth || actionLoading || closeLoading || closed || (queueCount === 0 && !nowServing);
   const disabledClose = !hasHostAuth || closeLoading || closed;
 
+  const trackHostAction = useCallback(
+    (event: Parameters<typeof trackEvent>[0], props?: Record<string, unknown>) => {
+      void trackEvent(event, {
+        sessionId,
+        queueCode: code,
+        props: {
+          screen: ANALYTICS_SCREEN,
+          ...(props ?? {}),
+        },
+      });
+    },
+    [code, sessionId]
+  );
+
   const advance = useCallback(
     async (nextPartyId?: string) => {
       if (!hasHostAuth || actionLoading) {
@@ -304,6 +326,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           setCallDeadline(null);
         }
         setConnectionError(null);
+        trackHostAction(nextPartyId ? 'host_call_specific' : 'host_call_next', {
+          targetPartyId: nextPartyId ?? updatedNowServing?.id ?? null,
+          queueLength: queue.length,
+        });
         await poll();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to advance queue';
@@ -312,7 +338,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setActionLoading(false);
       }
     },
-    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id, poll]
+    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id, poll, queue.length, trackHostAction]
   );
 
   const advanceSpecific = useCallback(
@@ -373,11 +399,18 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         url: shareableLink,
         title: 'Join our queue',
       });
+      trackHostAction('qr_shared', {
+        platform: Platform.OS,
+        hasLink: Boolean(shareableLink),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to share QR code.';
       Alert.alert('Share failed', message);
+      trackHostAction('qr_share_failed', {
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
     }
-  }, [code, shareableLink]);
+  }, [code, shareableLink, trackHostAction]);
 
   const handleSaveQr = useCallback(async () => {
     if (!shareableLink || !qrCodeRef.current || savingQr) {
@@ -560,9 +593,16 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         }
       }
       Alert.alert('Saved', 'QR code saved to your photos.');
+      trackHostAction('qr_saved', {
+        platform: Platform.OS,
+        method: isWeb ? 'download' : 'media_library',
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to save QR code.';
       Alert.alert('Save failed', message);
+      trackHostAction('qr_save_failed', {
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
     } finally {
       setSavingQr(false);
     }
@@ -574,6 +614,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     requestMediaPermission,
     savingQr,
     shareableLink,
+    trackHostAction,
   ]);
 
   const performCloseQueue = useCallback(async () => {
@@ -587,6 +628,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       setQueue([]);
       setNowServing(null);
       setConnectionError(null);
+      trackHostAction('host_close_queue', {
+        queueLengthBeforeClose: queue.length,
+        nowServing: nowServing?.id ?? null,
+      });
       try {
         // Remove this queue from persistent storage so HomeScreen won't show it anymore
         await storage.removeQueue(code);
@@ -606,7 +651,17 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     } finally {
       setCloseLoading(false);
     }
-  }, [closeLoading, code, hasHostAuth, hostToken, poll]);
+  }, [
+    closeLoading,
+    code,
+    hasHostAuth,
+    hostToken,
+    nowServing?.id,
+    poll,
+    queue.length,
+    sessionId,
+    trackHostAction,
+  ]);
 
   const handleCloseQueue = useCallback(() => {
     if (!hasHostAuth || closeLoading) {
@@ -634,7 +689,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
   const cancelCloseQueueWeb = useCallback(() => {
     setCloseConfirmVisibleWeb(false);
-  }, []);
+    trackHostAction('host_close_queue_cancelled');
+  }, [trackHostAction]);
 
   const reconnectManually = useCallback(
     (event?: GestureResponderEvent) => {

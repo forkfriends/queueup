@@ -176,6 +176,41 @@ export default StyleSheet.create({
         fontWeight: '600',
         color: '#111',
     },
+    trustSurveyPrompt: {
+        fontSize: 15,
+        color: '#333',
+    },
+    trustSurveyButtons: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 16,
+    },
+    trustSurveyButtonPrimary: {
+        flex: 1,
+        backgroundColor: '#1f6feb',
+        paddingVertical: 12,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    trustSurveyButtonSecondary: {
+        flex: 1,
+        borderRadius: 12,
+        paddingVertical: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#1f6feb',
+    },
+    trustSurveyButtonText: {
+        color: '#fff',
+        fontWeight: '700',
+    },
+    trustSurveyButtonTextSecondary: {
+        color: '#1f6feb',
+    },
+    trustSurveyThanks: {
+        fontSize: 15,
+        color: '#0a7d34',
+    },
     actions: {
         marginTop: 8,
         alignItems: 'center',

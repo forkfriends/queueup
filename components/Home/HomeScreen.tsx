@@ -118,6 +118,7 @@ export default function HomeScreen({ navigation }: Props) {
   return (
     <SafeAreaProvider style={styles.safe}>
       <View style={styles.container}>
+
         <Text style={styles.title}>Welcome to{'\n'}ForkFriends!</Text>
 
         <Image source={require('@assets/ff_logo.png')} style={styles.logo} resizeMode="contain" />

@@ -1,6 +1,7 @@
 import type { Env } from './worker';
 import { HOST_COOKIE_NAME, verifyHostCookie } from './utils/auth';
 import { buildPushPayload } from '@block65/webcrypto-web-push';
+import { logAnalyticsEvent } from './analytics';
 
 type QueueStatus = 'waiting' | 'called';
 type PartyRemovalReason = 'served' | 'left' | 'kicked' | 'no_show' | 'closed';
@@ -255,6 +256,13 @@ export class QueueDO implements DurableObject {
     if (!party.nearby) {
       party.nearby = true;
       await this.env.DB.prepare('UPDATE parties SET nearby = 1 WHERE id = ?1').bind(partyId).run();
+      await logAnalyticsEvent({
+        db: this.env.DB,
+        sessionId: this.sessionId,
+        partyId,
+        type: 'nudge_ack',
+        details: { source: 'declare_nearby' },
+      });
       await this.persistState();
       await this.publishState();
     }
@@ -1444,4 +1452,3 @@ export class QueueDO implements DurableObject {
     }
   }
 }
-

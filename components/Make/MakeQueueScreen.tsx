@@ -22,12 +22,14 @@ import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
 import { createQueue } from '../../lib/backend';
+import { trackEvent } from '../../utils/analytics';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 
 const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 100;
 const DEFAULT_QUEUE_SIZE = 20;
+const ANALYTICS_SCREEN = 'make_queue';
 
 type TimeField = 'open' | 'close';
 
@@ -197,6 +199,15 @@ export default function MakeQueueScreen({ navigation }: Props) {
       return;
     }
     const normalizedMaxGuests = Math.min(MAX_QUEUE_SIZE, Math.max(MIN_QUEUE_SIZE, maxSize));
+    const analyticsProps = {
+      screen: ANALYTICS_SCREEN,
+      maxGuests: normalizedMaxGuests,
+      hasTurnstile: Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY),
+      turnstileTokenPresent: Boolean(turnstileToken),
+    };
+    void trackEvent('queue_create_started', {
+      props: analyticsProps,
+    });
     setLoading(true);
 
     console.log('[QueueUp][create] Turnstile token:', turnstileToken ? 'present' : 'MISSING');
@@ -226,6 +237,15 @@ export default function MakeQueueScreen({ navigation }: Props) {
         }
       }
 
+      void trackEvent('queue_create_completed', {
+        sessionId: created.sessionId,
+        queueCode: created.code,
+        props: {
+          ...analyticsProps,
+          code: created.code,
+        },
+      });
+
       // Reset Turnstile for next use
       setTurnstileToken(null);
       if (turnstileRef.current?.reset) {
@@ -254,6 +274,13 @@ export default function MakeQueueScreen({ navigation }: Props) {
       } else {
         Alert.alert('Unable to create queue', message);
       }
+
+      void trackEvent('queue_create_failed', {
+        props: {
+          ...analyticsProps,
+          reason: message,
+        },
+      });
 
       // Reset Turnstile on error
       setTurnstileToken(null);

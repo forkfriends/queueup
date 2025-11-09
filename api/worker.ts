@@ -5,6 +5,7 @@ import {
   generateHostCookieValue,
   verifyHostCookie,
 } from './utils/auth';
+import { logAnalyticsEvent } from './analytics';
 export { QueueDO } from './queue-do';
 
 export interface Env {
@@ -242,19 +243,49 @@ export default {
               break;
 
             case 'QUEUE_POSITION_2':
-              await sendPushToParty(env, event.sessionId, event.partyId, {
-                title: 'Almost there!',
-                body: "You're next in line.",
-                kind: 'pos_2',
-              });
+              {
+                const sent = await sendPushToParty(env, event.sessionId, event.partyId, {
+                  title: 'Almost there!',
+                  body: "You're next in line.",
+                  kind: 'pos_2',
+                });
+                if (sent) {
+                  await logAnalyticsEvent({
+                    db: env.DB,
+                    sessionId: event.sessionId,
+                    partyId: event.partyId,
+                    type: 'nudge_sent',
+                    details: {
+                      kind: 'pos_2',
+                      position: event.position ?? 2,
+                      queueLength: event.queueLength ?? null,
+                    },
+                  });
+                }
+              }
               break;
 
             case 'QUEUE_POSITION_5':
-              await sendPushToParty(env, event.sessionId, event.partyId, {
-                title: 'Getting close!',
-                body: "You're 5th in line.",
-                kind: 'pos_5',
-              });
+              {
+                const sent = await sendPushToParty(env, event.sessionId, event.partyId, {
+                  title: 'Getting close!',
+                  body: "You're 5th in line.",
+                  kind: 'pos_5',
+                });
+                if (sent) {
+                  await logAnalyticsEvent({
+                    db: env.DB,
+                    sessionId: event.sessionId,
+                    partyId: event.partyId,
+                    type: 'nudge_sent',
+                    details: {
+                      kind: 'pos_5',
+                      position: event.position ?? 5,
+                      queueLength: event.queueLength ?? null,
+                    },
+                  });
+                }
+              }
               break;
 
             case 'QUEUE_MEMBER_JOINED':
@@ -271,15 +302,13 @@ export default {
         }
 
         // Log event to D1 (optional analytics)
-        await env.DB.prepare(
-          "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'queue_event', ?3)"
-        )
-          .bind(
-            event.sessionId,
-            event.partyId ?? null,
-            JSON.stringify({ eventType: event.type, ...event })
-          )
-          .run();
+        await logAnalyticsEvent({
+          db: env.DB,
+          sessionId: event.sessionId,
+          partyId: event.partyId ?? null,
+          type: 'queue_event',
+          details: { eventType: event.type, ...event },
+        });
 
         message.ack();
       } catch (error) {
@@ -353,7 +382,12 @@ async function sendPushNotification(
   try {
     const payload = await buildPushPayload(
       {
-        data: JSON.stringify({ title: params.title, body: params.body, url: params.url ?? '/' }),
+        data: JSON.stringify({
+          title: params.title,
+          body: params.body,
+          url: params.url ?? '/',
+          kind: params.kind ?? null,
+        }),
         options: { ttl: 60 },
       },
       {

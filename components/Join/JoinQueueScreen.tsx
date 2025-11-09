@@ -19,6 +19,7 @@ import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
 import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
+import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
@@ -27,6 +28,7 @@ const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 10;
 const DEFAULT_QUEUE_SIZE = 1;
 const POLL_INTERVAL_MS = 10000;
+const ANALYTICS_SCREEN = 'join_queue';
 
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const routeCode =
@@ -85,6 +87,15 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       return;
     }
 
+    void trackEvent('join_started', {
+      queueCode: trimmed,
+      props: {
+        partySize,
+        hasName: name.trim().length > 0,
+        turnstileTokenPresent: Boolean(turnstileToken),
+      },
+    });
+
     setLoading(true);
     setResultText(null);
     setJoinedCode(null);
@@ -114,6 +125,17 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           code: trimmed,
         });
       }
+
+      void trackEvent('join_completed', {
+        sessionId: joinResult.sessionId ?? null,
+        partyId: joinResult.partyId,
+        queueCode: trimmed,
+        props: {
+          partySize,
+          queueLength: joinResult.queueLength ?? null,
+          estimatedWaitMs: joinResult.estimatedWaitMs ?? null,
+        },
+      });
       // Store joined queue info
       try {
         await storage.setJoinedQueue({
@@ -206,7 +228,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
 
     setScannerActive(false);
-    setKey(scanned.toUpperCase().slice(-6)); // use last 6 chars as key
+    const normalized = scanned.toUpperCase().slice(-6);
+    if (normalized) {
+      void trackEvent('qr_scanned', {
+        queueCode: normalized,
+        props: { screen: ANALYTICS_SCREEN },
+      });
+      setKey(normalized);
+    }
     setScannerVisible(false);
   };
 
@@ -385,13 +414,37 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       const hasNotificationApi = typeof Notification !== 'undefined';
       if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
         setPushMessage('Notifications not supported in this browser.');
+        void trackEvent('push_denied', {
+          sessionId: targetSession,
+          partyId: targetParty,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            auto: Boolean(options?.silent),
+            reason: 'unsupported_capability',
+          },
+        });
         if (!options?.silent) {
           Alert.alert('Push not supported', 'This browser does not support web push notifications.');
         }
         return;
       }
+      const logPushMetric = (
+        event: 'push_prompt_shown' | 'push_granted' | 'push_denied',
+        props?: Record<string, unknown>
+      ) => {
+        void trackEvent(event, {
+          sessionId: targetSession,
+          partyId: targetParty,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            auto: Boolean(options?.silent),
+            ...(props ?? {}),
+          },
+        });
+      };
       try {
         setPushMessage('Enabling notifications…');
+        logPushMetric('push_prompt_shown');
         const publicKey = await getVapidPublicKey();
         if (!publicKey) {
           throw new Error('Missing VAPID key');
@@ -408,6 +461,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         const swScope = isGhPages ? '/queueup/' : '/';
         const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
         let subscription = await registration.pushManager.getSubscription();
+        let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
         const requestPermission = async () => {
           if (Notification.permission === 'granted') {
             return 'granted' as NotificationPermission;
@@ -421,6 +475,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           const perm = await requestPermission();
           if (perm !== 'granted') {
             setPushMessage('Notifications are blocked in your browser settings.');
+            logPushMetric('push_denied', { reason: perm });
             if (!options?.silent) {
               Alert.alert(
                 'Notifications blocked',
@@ -433,6 +488,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             userVisibleOnly: true,
             applicationServerKey: b64ToU8(publicKey),
           });
+          subscriptionState = 'new';
         }
         await savePushSubscription({
           sessionId: targetSession,
@@ -445,6 +501,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           sessionId: targetSession,
           partyId: targetParty,
         });
+        logPushMetric('push_granted', {
+          subscriptionState,
+        });
         setPushReady(true);
         setPushMessage('Notifications on');
         if (!options?.silent) {
@@ -452,6 +511,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         }
       } catch (e) {
         console.warn('enablePush failed', e);
+        logPushMetric('push_denied', {
+          reason: e instanceof Error ? e.message : 'unknown_error',
+        });
         setPushMessage('Unable to enable notifications right now.');
         if (!options?.silent) {
           Alert.alert('Failed to enable push', 'Please try again in a moment.');

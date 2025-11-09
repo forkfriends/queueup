@@ -9,6 +9,7 @@ import {
     Text,
     View,
 } from 'react-native';
+import { ArrowLeft } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import styles from './GuestQueueScreen.Styles';
@@ -20,6 +21,7 @@ import {
   leaveQueue,
   savePushSubscription,
 } from '../../lib/backend';
+import { trackEvent, trackTrustSurveySubmitted } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
 
@@ -27,6 +29,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
 
 const MS_PER_MINUTE = 60 * 1000;
 const POLL_INTERVAL_MS = 10000;
+const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
     // Override the back button behavior to go to HomeScreen
@@ -35,11 +38,15 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             headerLeft: () => (
                 <Pressable
                     onPress={() => navigation.navigate('HomeScreen')}
-                    style={({ pressed }) => [
-                        { opacity: pressed ? 0.7 : 1 },
-                        { marginLeft: 10 }
-                    ]}>
-                    <Text style={{ color: '#007AFF', fontSize: 17 }}>Home</Text>
+                    accessibilityRole="button"
+                    accessibilityLabel="Go home"
+                    hitSlop={12}
+                    style={({ pressed }) => ({
+                        opacity: pressed ? 0.6 : 1,
+                        padding: 8,
+                        marginLeft: 8,
+                    })}>
+                    <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
                 </Pressable>
             ),
         });
@@ -93,7 +100,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [called, setCalled] = useState(false);
   const [callDeadline, setCallDeadline] = useState<number | null>(null);
-    const isWeb = Platform.OS === 'web';
+  const [trustSurveyStatus, setTrustSurveyStatus] = useState<'pending' | 'submitted'>('pending');
+  const [trustSurveyAnswer, setTrustSurveyAnswer] = useState<'yes' | 'no' | null>(null);
+  const [trustSurveySubmitting, setTrustSurveySubmitting] = useState(false);
+  const isWeb = Platform.OS === 'web';
 
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -333,13 +343,37 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         const hasNotificationApi = typeof Notification !== 'undefined';
         if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
             setPushMessage('Notifications not supported in this browser.');
+            void trackEvent('push_denied', {
+              sessionId,
+              partyId,
+              props: {
+                screen: ANALYTICS_SCREEN,
+                auto: Boolean(options?.silent),
+                reason: 'unsupported_capability',
+              },
+            });
             if (!options?.silent) {
             Alert.alert('Push not supported', 'This browser does not support notifications.');
             }
             return;
         }
+        const logPushMetric = (
+          event: 'push_prompt_shown' | 'push_granted' | 'push_denied',
+          props?: Record<string, unknown>
+        ) => {
+          void trackEvent(event, {
+            sessionId,
+            partyId,
+            props: {
+              screen: ANALYTICS_SCREEN,
+              auto: Boolean(options?.silent),
+              ...(props ?? {}),
+            },
+          });
+        };
         try {
             setPushMessage('Enabling notifications…');
+            logPushMetric('push_prompt_shown');
             const publicKey = await getVapidPublicKey();
             if (!publicKey) {
             throw new Error('Missing VAPID key');
@@ -359,6 +393,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             const swScope = isGhPages ? '/queueup/' : '/';
             const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
             let subscription = await registration.pushManager.getSubscription();
+            let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
             const requestPermission = async () => {
             if (Notification.permission === 'granted') {
                 return 'granted' as NotificationPermission;
@@ -372,6 +407,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             const perm = await requestPermission();
             if (perm !== 'granted') {
                 setPushMessage('Notifications are blocked in your browser settings.');
+                logPushMetric('push_denied', { reason: perm });
                 if (!options?.silent) {
                 Alert.alert(
                     'Notifications blocked',
@@ -384,6 +420,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 userVisibleOnly: true,
                 applicationServerKey: b64ToU8(publicKey),
             });
+            subscriptionState = 'new';
             }
             await savePushSubscription({
             sessionId,
@@ -396,6 +433,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             sessionId,
             partyId,
             });
+            logPushMetric('push_granted', { subscriptionState });
             setPushReady(true);
             setPushMessage('Notifications on');
             if (!options?.silent) {
@@ -403,6 +441,9 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             }
         } catch (e) {
             console.warn('enablePush failed', e);
+            logPushMetric('push_denied', {
+              reason: e instanceof Error ? e.message : 'unknown_error',
+            });
             setPushMessage('Unable to enable notifications right now.');
             if (!options?.silent) {
             Alert.alert('Failed to enable push', 'Please try again in a moment.');
@@ -412,19 +453,46 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         [partyId, sessionId]
     );
 
-    useEffect(() => {
-        if (!isWeb || !sessionId || !partyId || pushReady) {
-        return;
+  useEffect(() => {
+    if (!isWeb || !sessionId || !partyId || pushReady) {
+      return;
+    }
+    const key = `${sessionId}:${partyId}`;
+    if (autoPushAttemptRef.current === key) {
+      return;
+    }
+    autoPushAttemptRef.current = key;
+    enablePush({ silent: true }).catch(() => {
+      // handled through pushMessage state
+    });
+  }, [isWeb, sessionId, partyId, pushReady, enablePush]);
+
+  useEffect(() => {
+    if (!code || !partyId) {
+      return;
+    }
+    let cancelled = false;
+    storage
+      .getTrustSurveyResponse(code, partyId)
+      .then((response) => {
+        if (cancelled) {
+          return;
         }
-        const key = `${sessionId}:${partyId}`;
-        if (autoPushAttemptRef.current === key) {
-        return;
+        if (response) {
+          setTrustSurveyStatus('submitted');
+          setTrustSurveyAnswer(response.answer);
+        } else {
+          setTrustSurveyStatus('pending');
+          setTrustSurveyAnswer(null);
         }
-        autoPushAttemptRef.current = key;
-        enablePush({ silent: true }).catch(() => {
-        // handled through pushMessage state
-        });
-    }, [isWeb, sessionId, partyId, pushReady, enablePush]);
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code, partyId]);
 
     const connectionLabel = useMemo(() => {
         switch (connectionState) {
@@ -441,15 +509,44 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
     const aheadDisplay = aheadCount ?? (typeof position === 'number' ? Math.max(position - 1, 0) : null);
     const queueLengthDisplay = queueLength ?? (typeof position === 'number' ? position : null);
-    const etaText = useMemo(() => {
-        if (estimatedWaitMs == null) {
-        return '—';
-        }
-        if (estimatedWaitMs <= MS_PER_MINUTE) {
-        return '< 1 min';
-        }
-        return `${Math.round(estimatedWaitMs / MS_PER_MINUTE)} min`;
-    }, [estimatedWaitMs]);
+  const etaText = useMemo(() => {
+    if (estimatedWaitMs == null) {
+      return '—';
+    }
+    if (estimatedWaitMs <= MS_PER_MINUTE) {
+      return '< 1 min';
+    }
+    return `${Math.round(estimatedWaitMs / MS_PER_MINUTE)} min`;
+  }, [estimatedWaitMs]);
+
+  const handleTrustSurveySubmit = useCallback(
+    async (answer: 'yes' | 'no') => {
+      if (!code || !partyId || trustSurveySubmitting) {
+        return;
+      }
+      setTrustSurveySubmitting(true);
+      try {
+        await storage.setTrustSurveyResponse(code, partyId, {
+          answer,
+          submittedAt: Date.now(),
+        });
+        setTrustSurveyStatus('submitted');
+        setTrustSurveyAnswer(answer);
+        await trackTrustSurveySubmitted({
+          sessionId,
+          partyId,
+          queueCode: code,
+          answers: { trust: answer },
+          props: { screen: ANALYTICS_SCREEN },
+        });
+      } catch (error) {
+        console.warn('Failed to submit trust survey', error);
+      } finally {
+        setTrustSurveySubmitting(false);
+      }
+    },
+    [code, partyId, sessionId, trustSurveySubmitting]
+  );
 
     const performLeave = useCallback(async () => {
         if (!code || !partyId) {
@@ -457,6 +554,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         }
         setLeaveLoading(true);
         try {
+        if (estimatedWaitMs != null) {
+          void trackEvent('abandon_after_eta', {
+            sessionId,
+            partyId,
+            queueCode: code,
+            props: {
+              estimatedWaitMs,
+              position,
+              aheadCount,
+              queueLength,
+              called,
+            },
+          });
+        }
         await leaveQueue({ code, partyId });
         try {
           await storage.removeJoinedQueue(code);
@@ -472,7 +583,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         setLeaveConfirmVisibleWeb(false);
         setLeaveLoading(false);
         }
-    }, [code, partyId, navigation]);
+    }, [code, partyId, navigation, estimatedWaitMs, sessionId, position, aheadCount, queueLength, called]);
 
     const cancelLeaveWeb = useCallback(() => {
         if (leaveLoading) {
@@ -615,6 +726,40 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                     <Text style={styles.metricValue}>{etaText}</Text>
                   </View>
                 </View>
+              </View>
+            ) : null}
+
+            {isActive ? (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Quick Trust Check</Text>
+                {trustSurveyStatus === 'submitted' ? (
+                  <Text style={styles.trustSurveyThanks}>
+                    Thanks! You answered “{trustSurveyAnswer === 'yes' ? 'Yes' : 'Not yet'}”.
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={styles.trustSurveyPrompt}>
+                      Does this live status feel trustworthy so far?
+                    </Text>
+                    <View style={styles.trustSurveyButtons}>
+                      <Pressable
+                        style={styles.trustSurveyButtonPrimary}
+                        onPress={() => handleTrustSurveySubmit('yes')}
+                        disabled={trustSurveySubmitting}>
+                        <Text style={styles.trustSurveyButtonText}>Yep</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.trustSurveyButtonSecondary}
+                        onPress={() => handleTrustSurveySubmit('no')}
+                        disabled={trustSurveySubmitting}>
+                        <Text
+                          style={[styles.trustSurveyButtonText, styles.trustSurveyButtonTextSecondary]}>
+                          Not yet
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </>
+                )}
               </View>
             ) : null}
 
