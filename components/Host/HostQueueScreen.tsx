@@ -56,7 +56,23 @@ type MediaPermissionOutcome =
   | { status: 'granted'; access: MediaLibrary.PermissionResponse['accessPrivileges'] | undefined }
   | { status: 'denied' | 'blocked' };
 
-export default function HostQueueScreen({ route }: Props) {
+export default function HostQueueScreen({ route, navigation }: Props) {
+  // Override the back button behavior to go to HomeScreen
+  useEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <Pressable
+          onPress={() => navigation.navigate('HomeScreen')}
+          style={({ pressed }) => [
+            { opacity: pressed ? 0.7 : 1 },
+            { marginLeft: 10 }
+          ]}>
+          <Text style={{ color: '#007AFF', fontSize: 17 }}>Home</Text>
+        </Pressable>
+      ),
+    });
+  }, [navigation]);
+
   const {
     code,
     sessionId,

@@ -19,6 +19,7 @@ import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
 import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
+import { storage } from '../../utils/storage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -113,6 +114,20 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           code: trimmed,
         });
       }
+      // Store joined queue info
+      try {
+        await storage.setJoinedQueue({
+          code: trimmed,
+          sessionId: joinResult.sessionId ?? '',
+          partyId: joinResult.partyId,
+          eventName: guestName || undefined,
+          joinedAt: Date.now()
+        });
+      } catch (storageError) {
+        console.warn('Failed to store joined queue info', storageError);
+      }
+
+      // Navigate to guest queue screen
       navigation.replace('GuestQueueScreen', {
         code: trimmed,
         partyId: joinResult.partyId,

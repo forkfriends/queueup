@@ -63,4 +63,30 @@ export default StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  joinedButton: {
+    marginTop: 20,
+    width: '100%',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#2ea44f',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  joinedButtonText: {
+    color: '#2ea44f',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  buttonSpacing: {
+    marginTop: 10,
+  },
 });
