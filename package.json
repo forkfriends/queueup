@@ -29,6 +29,7 @@
     "expo-camera": "~17.0.9",
     "expo-clipboard": "~8.0.7",
     "expo-file-system": "~19.0.17",
+    "expo-location": "^19.0.7",
     "expo-media-library": "~18.2.0",
     "expo-status-bar": "~3.0.8",
     "lucide-react-native": "^0.553.0",

@@ -12,6 +12,7 @@ web-build/
 
 api/.wrangler
 
+.env.local
 
 ios
 android
