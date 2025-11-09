@@ -32,7 +32,8 @@ const DEFAULT_QUEUE_SIZE = 20;
 const MAPBOX_GEOCODING_URL = 'https://api.mapbox.com/geocoding/v5/mapbox.places';
 const MAPBOX_SEARCH_DEBOUNCE_MS = 400;
 const MIN_LOCATION_QUERY_LENGTH = 3;
-const MAPBOX_TOKEN = (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN : undefined) ?? '';
+const MAPBOX_TOKEN =
+  (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN : undefined) ?? '';
 
 type TimeField = 'open' | 'close';
 type LocationSuggestion = {
@@ -77,7 +78,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const [locationSearchError, setLocationSearchError] = useState<string | null>(null);
   const [locationInputFocused, setLocationInputFocused] = useState(false);
   const [deviceCoords, setDeviceCoords] = useState<Location.LocationObjectCoords | null>(null);
-  const [locationPermissionStatus, setLocationPermissionStatus] = useState<Location.PermissionStatus | null>(null);
+  const [locationPermissionStatus, setLocationPermissionStatus] =
+    useState<Location.PermissionStatus | null>(null);
   const [maxSize, setMaxSize] = useState<number>(DEFAULT_QUEUE_SIZE);
   const [activePicker, setActivePicker] = useState<TimeField | null>(null);
   const [openTime, setOpenTime] = useState(() => createTime(9));
@@ -111,39 +113,40 @@ export default function MakeQueueScreen({ navigation }: Props) {
             : `Enter at least ${MIN_LOCATION_QUERY_LENGTH} characters to search nearby places.`);
   const showLocationPermissionHint = locationPermissionStatus === 'denied';
 
-  const ensureDeviceCoords = useCallback(async (): Promise<Location.LocationObjectCoords | null> => {
-    if (deviceCoords) {
-      return deviceCoords;
-    }
-    if (!isMapboxEnabled) {
-      return null;
-    }
-    if (locationPermissionStatus === 'denied') {
-      return null;
-    }
-    try {
-      const permissionResponse = await Location.requestForegroundPermissionsAsync();
-      setLocationPermissionStatus(permissionResponse.status);
-      if (permissionResponse.status !== 'granted') {
+  const ensureDeviceCoords =
+    useCallback(async (): Promise<Location.LocationObjectCoords | null> => {
+      if (deviceCoords) {
+        return deviceCoords;
+      }
+      if (!isMapboxEnabled) {
         return null;
       }
-
-      const lastKnown = await Location.getLastKnownPositionAsync({});
-      if (lastKnown?.coords) {
-        setDeviceCoords(lastKnown.coords);
-        return lastKnown.coords;
+      if (locationPermissionStatus === 'denied') {
+        return null;
       }
+      try {
+        const permissionResponse = await Location.requestForegroundPermissionsAsync();
+        setLocationPermissionStatus(permissionResponse.status);
+        if (permissionResponse.status !== 'granted') {
+          return null;
+        }
 
-      const current = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setDeviceCoords(current.coords);
-      return current.coords;
-    } catch (error) {
-      console.warn('[QueueUp][Location] Unable to determine host position', error);
-      return null;
-    }
-  }, [deviceCoords, isMapboxEnabled, locationPermissionStatus]);
+        const lastKnown = await Location.getLastKnownPositionAsync({});
+        if (lastKnown?.coords) {
+          setDeviceCoords(lastKnown.coords);
+          return lastKnown.coords;
+        }
+
+        const current = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        setDeviceCoords(current.coords);
+        return current.coords;
+      } catch (error) {
+        console.warn('[QueueUp][Location] Unable to determine host position', error);
+        return null;
+      }
+    }, [deviceCoords, isMapboxEnabled, locationPermissionStatus]);
 
   const handleLocationFocus = useCallback(() => {
     if (locationBlurTimeoutRef.current) {
@@ -226,7 +229,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
     }
     locationSearchAbortRef.current = controller;
 
-    locationSearchTimeoutRef.current = setTimeout(async () => {
+    const timeoutId = setTimeout(async () => {
       setIsSearchingLocations(true);
       setLocationSearchError(null);
       try {
@@ -277,14 +280,15 @@ export default function MakeQueueScreen({ navigation }: Props) {
         }
       }
     }, MAPBOX_SEARCH_DEBOUNCE_MS);
+    locationSearchTimeoutRef.current = timeoutId;
 
     return () => {
       controller.abort();
       if (locationSearchAbortRef.current === controller) {
         locationSearchAbortRef.current = null;
       }
-      if (locationSearchTimeoutRef.current) {
-        clearTimeout(locationSearchTimeoutRef.current);
+      if (locationSearchTimeoutRef.current === timeoutId) {
+        clearTimeout(timeoutId);
         locationSearchTimeoutRef.current = null;
       }
     };
@@ -438,7 +442,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
             joinUrl: created.joinUrl,
             eventName: created.eventName,
             maxGuests: created.maxGuests,
-            createdAt: Date.now()
+            createdAt: Date.now(),
           });
         } catch (error) {
           console.warn('Failed to store queue details:', error);
@@ -489,11 +493,10 @@ export default function MakeQueueScreen({ navigation }: Props) {
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', android: undefined })}
         style={{ flex: 1 }}>
-        <ScrollView 
-          contentContainerStyle={styles.scroll} 
+        <ScrollView
+          contentContainerStyle={styles.scroll}
           style={{ flex: 1 }}
-          keyboardShouldPersistTaps="handled"
-        >
+          keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Make Queue</Text>
 
           <View style={styles.card}>
@@ -560,7 +563,10 @@ export default function MakeQueueScreen({ navigation }: Props) {
                         ) : null}
                       </Pressable>
                     ))}
-                    {!isSearchingLocations && !locationSuggestions.length && hasMinimumLocationQuery && !locationSearchError ? (
+                    {!isSearchingLocations &&
+                    !locationSuggestions.length &&
+                    hasMinimumLocationQuery &&
+                    !locationSearchError ? (
                       <Text style={styles.locationSuggestionEmpty}>No nearby matches yet.</Text>
                     ) : null}
                   </View>
@@ -683,7 +689,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
             ) : null}
 
             {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
-              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+              <Text
+                style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
                 Complete the verification above to create queue
               </Text>
             ) : null}
@@ -692,12 +699,14 @@ export default function MakeQueueScreen({ navigation }: Props) {
             <Pressable
               style={[
                 styles.button,
-                (loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken))
+                loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)
                   ? styles.buttonDisabled
-                  : undefined
+                  : undefined,
               ]}
               onPress={onSubmit}
-              disabled={loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}>
+              disabled={
+                loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)
+              }>
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
