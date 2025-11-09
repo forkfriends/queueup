@@ -194,6 +194,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const onSubmit = async () => {
     if (loading) return;
     const trimmedEventName = eventName.trim();
+    const trimmedLocation = location.trim();
+    const trimmedContact = contact.trim();
     if (!trimmedEventName) {
       Alert.alert('Add event name', 'Please provide a name for this event.');
       return;
@@ -216,6 +218,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
       const created = await createQueue({
         eventName: trimmedEventName,
         maxGuests: normalizedMaxGuests,
+        location: trimmedLocation || undefined,
+        contactInfo: trimmedContact || undefined,
         turnstileToken: turnstileToken ?? undefined,
       });
       if (created.hostAuthToken) {
@@ -230,6 +234,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
             joinUrl: created.joinUrl,
             eventName: created.eventName,
             maxGuests: created.maxGuests,
+            location: created.location ?? (trimmedLocation || undefined),
+            contactInfo: created.contactInfo ?? (trimmedContact || undefined),
             createdAt: Date.now()
           });
         } catch (error) {
@@ -260,6 +266,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
         hostAuthToken: created.hostAuthToken,
         eventName: created.eventName ?? trimmedEventName,
         maxGuests: created.maxGuests ?? normalizedMaxGuests,
+        location: created.location ?? (trimmedLocation || undefined),
+        contactInfo: created.contactInfo ?? (trimmedContact || undefined),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error creating queue';

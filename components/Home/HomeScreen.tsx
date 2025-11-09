@@ -19,6 +19,8 @@ export default function HomeScreen({ navigation }: Props) {
     joinUrl?: string;
     eventName?: string;
     maxGuests?: number;
+    location?: string | null;
+    contactInfo?: string | null;
     createdAt: number;
   }>>([]);
 
@@ -175,6 +177,8 @@ export default function HomeScreen({ navigation }: Props) {
                 joinUrl: queue.joinUrl,
                 eventName: queue.eventName,
                 maxGuests: queue.maxGuests,
+                location: queue.location,
+                contactInfo: queue.contactInfo,
               });
             }}>
             <Text style={styles.buttonText}>

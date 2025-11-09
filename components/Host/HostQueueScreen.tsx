@@ -89,6 +89,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     joinUrl,
     eventName,
     maxGuests: initialMaxGuests,
+    location,
+    contactInfo,
   } = route.params;
   const storageKey = `queueup-host-auth:${sessionId}`;
 
@@ -142,6 +144,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           joinUrl,
           eventName,
           maxGuests: initialMaxGuests,
+          location,
+          contactInfo,
           createdAt: Date.now(),
         });
       } catch {

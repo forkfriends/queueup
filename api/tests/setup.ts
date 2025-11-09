@@ -43,4 +43,11 @@ await applyD1Migrations(env.DB, [
     name: '003_add_max_guests.sql',
     queries: [`ALTER TABLE sessions ADD COLUMN max_guests INTEGER DEFAULT 100;`],
   },
+  {
+    name: '005_add_location_contact.sql',
+    queries: [
+      `ALTER TABLE sessions ADD COLUMN location TEXT;`,
+      `ALTER TABLE sessions ADD COLUMN contact_info TEXT;`,
+    ],
+  },
 ]);

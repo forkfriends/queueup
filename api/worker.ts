@@ -35,6 +35,8 @@ const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const MIN_QUEUE_CAPACITY = 1;
 const MAX_QUEUE_CAPACITY = 100;
+const MAX_LOCATION_LENGTH = 240;
+const MAX_CONTACT_LENGTH = 500;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -473,6 +475,20 @@ async function handleCreate(
     return jsonError('eventName must be 120 characters or fewer', 400);
   }
 
+  const rawLocation = typeof (payload as any).location === 'string'
+    ? (payload as any).location.trim()
+    : '';
+  const normalizedLocation = rawLocation.length > 0 ? rawLocation.slice(0, MAX_LOCATION_LENGTH) : null;
+
+  const rawContactInfo =
+    typeof (payload as any).contactInfo === 'string'
+      ? (payload as any).contactInfo.trim()
+      : typeof (payload as any).contact === 'string'
+        ? (payload as any).contact.trim()
+        : '';
+  const normalizedContactInfo =
+    rawContactInfo.length > 0 ? rawContactInfo.slice(0, MAX_CONTACT_LENGTH) : null;
+
   const rawMaxGuests = (payload as any).maxGuests;
   let maxGuests: number | null = null;
   if (typeof rawMaxGuests === 'number') {
@@ -531,9 +547,9 @@ async function handleCreate(
   const shortCode = await generateUniqueCode(env);
 
   const insertResult = await env.DB.prepare(
-    "INSERT INTO sessions (id, short_code, status, event_name, max_guests) VALUES (?1, ?2, 'active', ?3, ?4)"
+    "INSERT INTO sessions (id, short_code, status, event_name, max_guests, location, contact_info) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6)"
   )
-    .bind(sessionId, shortCode, eventName, maxGuests)
+    .bind(sessionId, shortCode, eventName, maxGuests, normalizedLocation, normalizedContactInfo)
     .run();
 
   if (insertResult.error) {
@@ -564,6 +580,8 @@ async function handleCreate(
     hostAuthToken: hostCookieValue,
     eventName,
     maxGuests,
+    location: normalizedLocation,
+    contactInfo: normalizedContactInfo,
   });
 
   return new Response(body, { status: 200, headers });

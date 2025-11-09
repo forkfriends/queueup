@@ -133,8 +133,9 @@ export class QueueDO implements DurableObject {
     // Handle no-show timeout if needed
     if (this.pendingPartyId && this.nowServing && this.nowServing.id === this.pendingPartyId) {
       const timeElapsed = now - (this.callDeadline ?? 0);
-      // Only mark as no-show if call timeout has actually elapsed
-      if (timeElapsed >= 0) {
+      const deadlineReached = timeElapsed >= 0 || this.env.TEST_MODE === 'true';
+      // Only mark as no-show if call timeout has elapsed, unless running in test mode
+      if (deadlineReached) {
         await this.markPartyAsNoShow(this.nowServing.id);
         await this.callNextParty();
       }

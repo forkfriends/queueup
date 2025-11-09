@@ -11,7 +11,7 @@
     "preweb": "mkdir -p public && cp docs/sw.js public/sw.js",
     "web": "expo start --web",
     "build:web": "mkdir -p public && cp docs/sw.js public/sw.js && cp assets/ff_logo.png public/icon-192.png && cp assets/ff_logo.png public/icon-512.png && expo export --platform web --output-dir docs && cp public/manifest.json docs/manifest.json && cp public/icon-192.png docs/icon-192.png && cp public/icon-512.png docs/icon-512.png",
-    "deploy:apply": "wrangler d1 migrations apply DB",
+    "deploy:apply": "wrangler d1 migrations apply DB --remote --config api/wrangler.toml",
     "deploy:push": "wrangler deploy --config api/wrangler.toml",
     "test": "vitest run --config api/vitest.config.ts",
     "test:watch": "vitest --config api/vitest.config.ts"
@@ -32,6 +32,7 @@
     "expo-status-bar": "~3.0.8",
     "lucide-react-native": "^0.553.0",
     "nativewind": "4.1.21",
+    "qr-code-styling": "^1.9.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",

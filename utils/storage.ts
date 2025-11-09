@@ -14,6 +14,8 @@ export type StoredQueue = {
   joinUrl?: string;
   eventName?: string;
   maxGuests?: number;
+  location?: string | null;
+  contactInfo?: string | null;
   createdAt: number; // timestamp for sorting
 };
 
