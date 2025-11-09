@@ -89,6 +89,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const locationSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationBlurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationSearchAbortRef = useRef<AbortController | null>(null);
+  const isSelectingLocationRef = useRef<boolean>(false);
   const isMapboxEnabled = Boolean(MAPBOX_TOKEN);
   const isWeb = Platform.OS === 'web';
   const hasMinimumLocationQuery = location.trim().length >= MIN_LOCATION_QUERY_LENGTH;
@@ -103,9 +104,11 @@ export default function MakeQueueScreen({ navigation }: Props) {
       ? 'Searching nearby places…'
       : !location
         ? 'Start typing to search for a venue near you.'
-        : hasMinimumLocationQuery
+        : hasMinimumLocationQuery && shouldShowLocationSuggestions
           ? 'Tap a result below to autofill the location.'
-          : `Enter at least ${MIN_LOCATION_QUERY_LENGTH} characters to search nearby places.`);
+          : hasMinimumLocationQuery
+            ? ''
+            : `Enter at least ${MIN_LOCATION_QUERY_LENGTH} characters to search nearby places.`);
   const showLocationPermissionHint = locationPermissionStatus === 'denied';
 
   const ensureDeviceCoords = useCallback(async (): Promise<Location.LocationObjectCoords | null> => {
@@ -157,10 +160,15 @@ export default function MakeQueueScreen({ navigation }: Props) {
   }, []);
 
   const handleLocationSuggestionPress = useCallback((suggestion: LocationSuggestion) => {
+    isSelectingLocationRef.current = true;
     setLocation(suggestion.fullText);
     setLocationSuggestions([]);
     setLocationSearchError(null);
     setLocationInputFocused(false);
+    // Reset the flag after a brief delay to allow state updates to complete
+    setTimeout(() => {
+      isSelectingLocationRef.current = false;
+    }, 100);
   }, []);
 
   useEffect(() => {
@@ -184,6 +192,11 @@ export default function MakeQueueScreen({ navigation }: Props) {
     if (!isMapboxEnabled) {
       setLocationSuggestions([]);
       setIsSearchingLocations(false);
+      return;
+    }
+
+    // Skip search if location was set programmatically (from selection)
+    if (isSelectingLocationRef.current) {
       return;
     }
 
