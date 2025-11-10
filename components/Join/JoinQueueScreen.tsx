@@ -684,15 +684,18 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
 
   const handleGoHome = useCallback(() => {
     setConnectionErrorModalVisible(false);
-    navigation.navigate('HomeScreen');
-  }, [navigation]);
+    shouldReconnectRef.current = false;
+    clearReconnect();
+    stopPolling();
+    navigation.replace('HomeScreen');
+  }, [clearReconnect, stopPolling, navigation]);
 
   const handleRetryConnection = useCallback(() => {
     setConnectionErrorModalVisible(false);
     setConnectionError(null);
     // Retry polling
-    poll();
-  }, [poll]);
+    startPolling();
+  }, [startPolling]);
 
   const renderPushBell = () => {
     if (!isWeb || !partyId || !sessionId) return null;

@@ -704,8 +704,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
   const handleGoHome = useCallback(() => {
     setConnectionErrorModalVisible(false);
-    navigation.navigate('HomeScreen');
-  }, [navigation]);
+    clearReconnectTimeout();
+    stopPolling();
+    navigation.replace('HomeScreen');
+  }, [clearReconnectTimeout, stopPolling, navigation]);
 
   const handleRetryConnection = useCallback(() => {
     setConnectionErrorModalVisible(false);

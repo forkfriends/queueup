@@ -799,10 +799,9 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                       }
                     }}>
                     <Bell
-                      size={16}
-                      style={pushReady ? styles.pushIconActive : styles.pushIcon}
-                      color={pushReady ? '#fff' : '#1f6feb'}
-                    />
+                       size={16}
+                       color={pushReady ? '#fff' : '#1f6feb'}
+                     />
                     {pushReady ? <Check size={14} color="#fff" /> : null}
                     <Text
                       style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>

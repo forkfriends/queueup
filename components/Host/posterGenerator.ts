@@ -264,10 +264,18 @@ async function addLogoToQr(qrImage: HTMLImageElement, logoDataUri?: string): Pro
     const plaqueY = logoY - margin;
     const plaqueRadius = Math.round(POSTER_WIDTH * 0.035);
 
+    // Draw white plaque background
     ctx.fillStyle = '#FFFFFF';
     drawRoundedRect(ctx, plaqueX, plaqueY, plaqueSize, plaqueSize, plaqueRadius);
     ctx.fill();
 
+    // Draw outline around the logo plaque for emphasis
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 8;
+    drawRoundedRect(ctx, plaqueX, plaqueY, plaqueSize, plaqueSize, plaqueRadius);
+    ctx.stroke();
+
+    // Draw the logo itself
     ctx.drawImage(logoImg, logoX, logoY, logoSize, logoSize);
 
     const blob = await canvasToBlob(canvas);

@@ -130,16 +130,6 @@ export default StyleSheet.create({
     pushButtonTextActive: {
         color: '#fff',
     },
-    pushIcon: {
-        width: 16,
-        height: 16,
-        color: '#1f6feb',
-    },
-    pushIconActive: {
-        width: 16,
-        height: 16,
-        color: '#fff',
-    },
     metaText: {
         marginTop: 8,
         fontSize: 13,
