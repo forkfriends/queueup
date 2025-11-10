@@ -317,8 +317,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     setConnectionState('connecting');
     setConnectionError(null);
 
-    console.log('[HostQueueScreen] Starting polling');
-
     // Poll immediately
     poll();
 
@@ -334,7 +332,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       return;
     }
     // Poll immediately when we have host auth and snapshot URL ready
-    console.log('[HostQueueScreen] Immediate poll for queue info');
     poll();
   }, [hasHostAuth, snapshotUrl, poll]);
 
@@ -920,15 +917,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
                 maximumZoomScale={3}
                 minimumZoomScale={0.5}>
                 <View style={styles.posterModalImageWrapper}>
-                  {posterImageUrl ? (
-                    <Image
-                      source={{ uri: posterImageUrl }}
-                      style={styles.posterModalImage}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <Text style={styles.posterModalImagePlaceholder}>Poster preview</Text>
-                  )}
+                  <Image
+                    source={{ uri: posterImageUrl }}
+                    style={styles.posterModalImage}
+                    resizeMode="contain"
+                  />
                 </View>
               </ScrollView>
               <View style={styles.posterModalControls}>

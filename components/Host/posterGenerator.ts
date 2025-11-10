@@ -210,7 +210,18 @@ async function generateQrBlob(data: string): Promise<Blob> {
   }
 
   if (ArrayBuffer.isView(qrData)) {
-    return new Blob([qrData.buffer], { type: 'image/png' });
+    // Convert ArrayBufferView to ArrayBuffer for Blob compatibility
+    // Handle SharedArrayBuffer by creating a new ArrayBuffer copy
+    let buffer: ArrayBuffer;
+    if (qrData.buffer instanceof SharedArrayBuffer) {
+      // Create a new ArrayBuffer copy from SharedArrayBuffer
+      buffer = new ArrayBuffer(qrData.buffer.byteLength);
+      const view = new Uint8Array(buffer);
+      view.set(new Uint8Array(qrData.buffer));
+    } else {
+      buffer = qrData.buffer;
+    }
+    return new Blob([buffer], { type: 'image/png' });
   }
 
   throw new Error('Unsupported QR data format');

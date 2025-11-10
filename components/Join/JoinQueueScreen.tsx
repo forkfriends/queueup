@@ -17,7 +17,7 @@ import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'ex
 import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
-import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
+import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL, type PushSubscriptionParams } from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
@@ -565,10 +565,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           });
           subscriptionState = 'new';
         }
+        const subscriptionJson = subscription.toJSON?.();
+        if (!subscriptionJson || !subscriptionJson.endpoint) {
+          throw new Error('Invalid subscription: missing endpoint');
+        }
         await savePushSubscription({
           sessionId: targetSession,
           partyId: targetParty,
-          subscription: subscription.toJSON?.() ?? (subscription as any),
+          subscription: subscriptionJson as PushSubscriptionParams,
         });
         console.log('[QueueUp][push] saved subscription', {
           endpoint: subscription.endpoint,
