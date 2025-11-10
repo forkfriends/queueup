@@ -222,7 +222,11 @@ describe('queue lifecycle integration', () => {
     const alarmRan = await runDurableObjectAlarm(stub);
     expect(alarmRan).toBe(true);
 
-    const snapshotAfterAlarm = await fetchJson(`/api/queue/${shortCode}/snapshot`);
+    const snapshotAfterAlarm = await fetchJson(`/api/queue/${shortCode}/snapshot`, {
+      headers: {
+        Cookie: hostCookie,
+      },
+    });
     expect(snapshotAfterAlarm.status).toBe(200);
     const snapshotBody = await snapshotAfterAlarm.json<QueueUpdateMessage>();
     expect(snapshotBody.nowServing).toBeNull();
