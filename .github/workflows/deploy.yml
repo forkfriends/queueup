@@ -1,14 +1,15 @@
-name: Deploy
+name: Deploy (disabled)
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "api/**"
+  workflow_dispatch:
+    inputs:
+      disabled:
+        description: "This workflow is disabled; do not run."
+        required: false
 
 jobs:
   deploy:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

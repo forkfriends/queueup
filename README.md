@@ -37,8 +37,6 @@ QueueUp is a real-time queueing companion for pop-up events, meet-and-greets, an
   `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.YourTokenHere`  
   Hosts can then search for nearby venues on the Make Queue screen, powered by Mapbox's place data and the device's current location (via Expo Location).
 
-## change
-
 ## Backend Setup
 
 The Cloudflare Worker that powers QueueUp lives in `api/`. Follow the step-by-step backend guide in [docs/BACKEND-QUICKSTART.md](docs/BACKEND-QUICKSTART.md) to provision D1, KV, secrets, and run migrations.
@@ -69,8 +67,3 @@ See the complete setup guide: [docs/TURNSTILE-SETUP.md](docs/TURNSTILE-SETUP.md)
 - API contract: `docs/API.md`
 - Turnstile setup: `docs/TURNSTILE-SETUP.md`
 - Deploying the web front end: `.github/workflows/deploy-gh-pages.yml`
-<<<<<<< Updated upstream
-=======
-
-> > > > > > > main
->>>>>>> Stashed changes

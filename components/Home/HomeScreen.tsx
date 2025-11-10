@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Image, Pressable, Platform } from 'react-native';
 import { storage } from '../../utils/storage';
+import type { StoredQueue, StoredJoinedQueue } from '../../utils/storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
@@ -11,24 +12,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 export default function HomeScreen({ navigation }: Props) {
   const handledPrefillRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
-  const [activeQueues, setActiveQueues] = React.useState<Array<{
-    code: string;
-    sessionId: string;
-    wsUrl: string;
-    hostAuthToken: string;
-    joinUrl?: string;
-    eventName?: string;
-    maxGuests?: number;
-    createdAt: number;
-  }>>([]);
+  const [activeQueues, setActiveQueues] = React.useState<StoredQueue[]>([]);
 
-  const [joinedQueues, setJoinedQueues] = React.useState<Array<{
-    code: string;
-    sessionId: string;
-    partyId: string;
-    eventName?: string;
-    joinedAt: number;
-  }>>([]);
+  const [joinedQueues, setJoinedQueues] = React.useState<StoredJoinedQueue[]>([]);
 
   // Check for active queue on mount and when returning to screen
   const checkForQueues = React.useCallback(async () => {
@@ -118,9 +104,15 @@ export default function HomeScreen({ navigation }: Props) {
   return (
     <SafeAreaProvider style={styles.safe}>
       <View style={styles.container}>
-        <Text style={styles.title}>Welcome to{'\n'}ForkFriends!</Text>
 
-        <Image source={require('@assets/ff_logo.png')} style={styles.logo} resizeMode="contain" />
+        <View style={styles.titleContainer}>
+          {Platform.OS === 'web' ? (
+            <Image source={{ uri: '/queueup/icon-black.svg' }} style={styles.logoIcon} resizeMode="contain" />
+          ) : (
+            <Image source={require('@assets/ff_logo.png')} style={styles.logoIcon} resizeMode="contain" />
+          )}
+          <Text style={styles.title}>QueueUp</Text>
+        </View>
 
         <View style={styles.buttonRow}>
           <Pressable
@@ -136,51 +128,65 @@ export default function HomeScreen({ navigation }: Props) {
           </Pressable>
         </View>
 
-        {joinedQueues.map((queue, index) => (
-          <Pressable
-            key={`joined-${queue.code}`}
-            style={[
-              styles.button,
-              styles.joinedButton,
-              index > 0 && styles.buttonSpacing
-            ]}
-            onPress={() => {
-              navigation.navigate('GuestQueueScreen', {
-                code: queue.code,
-                sessionId: queue.sessionId,
-                partyId: queue.partyId
-              });
-            }}>
-            <Text style={styles.joinedButtonText}>
-              Joined {queue.eventName ? `(${queue.eventName})` : queue.code}
-            </Text>
-          </Pressable>
-        ))}
+        {joinedQueues.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Joined Queues</Text>
+            {joinedQueues.map((queue, index) => (
+              <Pressable
+                key={`joined-${queue.code}`}
+                style={[
+                  styles.button,
+                  styles.joinedButton,
+                  index > 0 && styles.buttonSpacing
+                ]}
+                onPress={() => {
+                  navigation.navigate('GuestQueueScreen', {
+                    code: queue.code,
+                    sessionId: queue.sessionId,
+                    partyId: queue.partyId
+                  });
+                }}>
+                <Text style={styles.joinedButtonText}>
+                  {queue.eventName || queue.code}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
 
-        {activeQueues.map((queue, index) => (
-          <Pressable
-            key={`host-${queue.code}`}
-            style={[
-              styles.button,
-              styles.returnButton,
-              index > 0 && styles.returnButtonSpacing
-            ]}
-            onPress={() => {
-              navigation.navigate('HostQueueScreen', {
-                code: queue.code,
-                sessionId: queue.sessionId,
-                wsUrl: queue.wsUrl,
-                hostAuthToken: queue.hostAuthToken,
-                joinUrl: queue.joinUrl,
-                eventName: queue.eventName,
-                maxGuests: queue.maxGuests,
-              });
-            }}>
-            <Text style={styles.buttonText}>
-              View {queue.eventName ? `(${queue.eventName})` : queue.code}
-            </Text>
-          </Pressable>
-        ))}
+        {activeQueues.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Hosted Queues</Text>
+            {activeQueues.map((queue, index) => (
+              <Pressable
+                key={`host-${queue.code}`}
+                style={[
+                  styles.button,
+                  styles.returnButton,
+                  index > 0 && styles.returnButtonSpacing
+                ]}
+                onPress={() => {
+                navigation.navigate('HostQueueScreen', {
+                  code: queue.code,
+                  sessionId: queue.sessionId,
+                  wsUrl: queue.wsUrl,
+                  hostAuthToken: queue.hostAuthToken,
+                  joinUrl: queue.joinUrl,
+                  eventName: queue.eventName,
+                  maxGuests: queue.maxGuests,
+                  location: queue.location,
+                  contactInfo: queue.contactInfo,
+                  openTime: queue.openTime,
+                  closeTime: queue.closeTime,
+                });
+                }}>
+                <Text style={styles.buttonText}>
+                  {queue.eventName ? queue.eventName : queue.code}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
       </View>
     </SafeAreaProvider>
   );

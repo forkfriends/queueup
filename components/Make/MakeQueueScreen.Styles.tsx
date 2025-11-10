@@ -192,9 +192,9 @@ const styles = StyleSheet.create({
   },
   button: {
     marginTop: 18,
-    backgroundColor: '#222',
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: '#111',
+    borderRadius: 14,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '600',
   },
   resultCard: {
@@ -235,14 +235,14 @@ const styles = StyleSheet.create({
   hostButton: {
     marginTop: 16,
     backgroundColor: '#1f6feb',
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 14,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   hostButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
 });

@@ -5,12 +5,14 @@ import {
   generateHostCookieValue,
   verifyHostCookie,
 } from './utils/auth';
+import { logAnalyticsEvent } from './analytics';
 export { QueueDO } from './queue-do';
 
 export interface Env {
   QUEUE_DO: DurableObjectNamespace;
   QUEUE_KV: KVNamespace;
   DB: D1Database;
+  EVENTS: Queue;
   TURNSTILE_SECRET_KEY: string;
   HOST_AUTH_SECRET: string;
   VAPID_PUBLIC?: string;
@@ -23,14 +25,18 @@ export interface Env {
 }
 
 const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/queueup/';
+const MS_PER_MINUTE = 60 * 1000;
+const FALLBACK_CALL_WINDOW_MINUTES = 2;
 
 const ROUTE =
-  /^\/api\/queue(?:\/(create|[A-Za-z0-9]{6})(?:\/(join|declare-nearby|leave|advance|kick|close|connect))?)?$/;
+  /^\/api\/queue(?:\/(create|[A-Za-z0-9]{6})(?:\/(join|declare-nearby|leave|advance|kick|close|connect|snapshot))?)?$/;
 const SHORT_CODE_LENGTH = 6;
 const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const MIN_QUEUE_CAPACITY = 1;
 const MAX_QUEUE_CAPACITY = 100;
+const MAX_LOCATION_LENGTH = 240;
+const MAX_CONTACT_LENGTH = 500;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -116,17 +122,27 @@ export default {
 
     // Track events (notif clicks, etc.)
     if (request.method === 'POST' && url.pathname === '/api/track') {
-      try {
-        const { sessionId, partyId, type, meta } = (await readJson(request)) ?? {};
-        if (!type) return applyCors(jsonError('type required', 400), corsOrigin);
-        await env.DB.prepare(
-          'INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, ?3, ?4)'
-        ).bind(sessionId ?? null, partyId ?? null, String(type), meta ? JSON.stringify(meta) : null).run();
-        return applyCors(new Response('ok'), corsOrigin);
-      } catch (e) {
-        console.error('track error', e);
-        return applyCors(new Response('fail', { status: 500 }), corsOrigin);
+      const payload = (await readJson(request)) ?? {};
+      const { sessionId, partyId, type, meta } = payload;
+      if (!type) {
+        return applyCors(jsonError('type required', 400), corsOrigin);
       }
+      try {
+        const insertResult = await env.DB.prepare(
+          'INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, ?3, ?4)'
+        ).bind(
+          sessionId ?? null,
+          partyId ?? null,
+          String(type),
+          meta ? JSON.stringify(meta) : null
+        ).run();
+        if (insertResult.error) {
+          console.warn('track insert warning', insertResult.error);
+        }
+      } catch (error) {
+        console.error('track error', error);
+      }
+      return applyCors(new Response('ok'), corsOrigin);
     }
 
     // Manual test push endpoint
@@ -180,6 +196,11 @@ export default {
         return applyCors(response, corsOrigin, ['set-cookie']);
       }
 
+      if (primary && action === 'snapshot' && request.method === 'GET') {
+        const response = await handleSnapshot(request, env, primary);
+        return applyCors(response, corsOrigin, ['etag']);
+      }
+
       if (request.method === 'POST' && primary && action) {
         const response = await handleAction(request, env, primary, action);
         return applyCors(response, corsOrigin);
@@ -195,7 +216,152 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // Scheduled cleanup will arrive in later checkpoints.
   },
+
+  async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
+    for (const message of batch.messages) {
+      try {
+        const event = message.body as {
+          type: string;
+          sessionId: string;
+          partyId?: string;
+          position?: number;
+          queueLength?: number;
+          deadline?: number | null;
+          reason?: string;
+        };
+
+        console.log(`[Queue Consumer] Processing event: ${event.type} for session ${event.sessionId}`);
+
+        // Handle push notifications
+        if (event.partyId) {
+          switch (event.type) {
+            case 'QUEUE_MEMBER_CALLED':
+              {
+                const msRemaining =
+                  typeof event.deadline === 'number'
+                    ? Math.max(event.deadline - Date.now(), 0)
+                    : FALLBACK_CALL_WINDOW_MINUTES * MS_PER_MINUTE;
+                const minutesRemaining = Math.max(
+                  1,
+                  Math.ceil(msRemaining / MS_PER_MINUTE)
+                );
+                const minuteLabel = minutesRemaining === 1 ? 'minute' : 'minutes';
+                await sendPushToParty(env, event.sessionId, event.partyId, {
+                  title: "It's your turn!",
+                  body: `Please confirm within ${minutesRemaining} ${minuteLabel}.`,
+                  kind: 'called',
+                });
+              }
+              break;
+
+            case 'QUEUE_POSITION_2':
+              {
+                const sent = await sendPushToParty(env, event.sessionId, event.partyId, {
+                  title: 'Almost there!',
+                  body: "You're next in line.",
+                  kind: 'pos_2',
+                });
+                if (sent) {
+                  await logAnalyticsEvent({
+                    db: env.DB,
+                    sessionId: event.sessionId,
+                    partyId: event.partyId,
+                    type: 'nudge_sent',
+                    details: {
+                      kind: 'pos_2',
+                      position: event.position ?? 2,
+                      queueLength: event.queueLength ?? null,
+                    },
+                  });
+                }
+              }
+              break;
+
+            case 'QUEUE_POSITION_5':
+              {
+                const sent = await sendPushToParty(env, event.sessionId, event.partyId, {
+                  title: 'Getting close!',
+                  body: "You're 5th in line.",
+                  kind: 'pos_5',
+                });
+                if (sent) {
+                  await logAnalyticsEvent({
+                    db: env.DB,
+                    sessionId: event.sessionId,
+                    partyId: event.partyId,
+                    type: 'nudge_sent',
+                    details: {
+                      kind: 'pos_5',
+                      position: event.position ?? 5,
+                      queueLength: event.queueLength ?? null,
+                    },
+                  });
+                }
+              }
+              break;
+
+            case 'QUEUE_MEMBER_JOINED':
+              // Already handled in subscribe endpoint
+              break;
+
+            case 'QUEUE_MEMBER_SERVED':
+            case 'QUEUE_MEMBER_DROPPED':
+            case 'QUEUE_MEMBER_LEFT':
+            case 'QUEUE_MEMBER_KICKED':
+              // No push needed for these
+              break;
+          }
+        }
+
+        // Log event to D1 (optional analytics)
+        await logAnalyticsEvent({
+          db: env.DB,
+          sessionId: event.sessionId,
+          partyId: event.partyId ?? null,
+          type: 'queue_event',
+          details: { eventType: event.type, ...event },
+        });
+
+        message.ack();
+      } catch (error) {
+        console.error('[Queue Consumer] Error processing message:', error);
+        message.retry();
+      }
+    }
+  },
 };
+
+async function sendPushToParty(
+  env: Env,
+  sessionId: string,
+  partyId: string,
+  params: {
+    title: string;
+    body: string;
+    kind?: string;
+  }
+): Promise<boolean> {
+  const sub = await env.DB.prepare(
+    'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE session_id=?1 AND party_id=?2 ORDER BY created_at DESC LIMIT 1'
+  )
+    .bind(sessionId, partyId)
+    .first<{ endpoint: string; p256dh: string; auth: string }>();
+
+  if (!sub) {
+    console.log(`[sendPushToParty] No subscription found for party ${partyId}`);
+    return false;
+  }
+
+  return sendPushNotification(env, {
+    sessionId,
+    partyId,
+    subscription: { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+    title: params.title,
+    body: params.body,
+    url: buildAppUrl(env),
+    kind: params.kind,
+  });
+}
 
 async function sendPushNotification(
   env: Env,
@@ -228,7 +394,12 @@ async function sendPushNotification(
   try {
     const payload = await buildPushPayload(
       {
-        data: JSON.stringify({ title: params.title, body: params.body, url: params.url ?? '/' }),
+        data: JSON.stringify({
+          title: params.title,
+          body: params.body,
+          url: params.url ?? '/',
+          kind: params.kind ?? null,
+        }),
         options: { ttl: 60 },
       },
       {
@@ -295,6 +466,17 @@ function buildAppUrl(env: Env): string {
   }
 }
 
+function normalizeTimeString(value: string): string | null {
+  const trimmed = value.trim();
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(trimmed);
+  return match ? `${match[1]}:${match[2]}` : null;
+}
+
+function timeStringToMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map((part) => Number(part));
+  return hours * 60 + minutes;
+}
+
 async function handleCreate(
   request: Request,
   env: Env,
@@ -312,6 +494,46 @@ async function handleCreate(
   }
   if (rawEventName.length > 120) {
     return jsonError('eventName must be 120 characters or fewer', 400);
+  }
+
+  const rawLocation = typeof (payload as any).location === 'string'
+    ? (payload as any).location.trim()
+    : '';
+  const normalizedLocation = rawLocation.length > 0 ? rawLocation.slice(0, MAX_LOCATION_LENGTH) : null;
+
+  const rawContactInfo =
+    typeof (payload as any).contactInfo === 'string'
+      ? (payload as any).contactInfo.trim()
+      : typeof (payload as any).contact === 'string'
+        ? (payload as any).contact.trim()
+        : '';
+  const normalizedContactInfo =
+    rawContactInfo.length > 0 ? rawContactInfo.slice(0, MAX_CONTACT_LENGTH) : null;
+
+  const rawOpenTime =
+    typeof (payload as any).openTime === 'string'
+      ? (payload as any).openTime.trim()
+      : '';
+  const normalizedOpenTime = rawOpenTime.length > 0 ? normalizeTimeString(rawOpenTime) : null;
+  if (rawOpenTime.length > 0 && !normalizedOpenTime) {
+    return jsonError('openTime must be in HH:mm format', 400);
+  }
+
+  const rawCloseTime =
+    typeof (payload as any).closeTime === 'string'
+      ? (payload as any).closeTime.trim()
+      : '';
+  const normalizedCloseTime = rawCloseTime.length > 0 ? normalizeTimeString(rawCloseTime) : null;
+  if (rawCloseTime.length > 0 && !normalizedCloseTime) {
+    return jsonError('closeTime must be in HH:mm format', 400);
+  }
+
+  if (normalizedOpenTime && normalizedCloseTime) {
+    const openMinutes = timeStringToMinutes(normalizedOpenTime);
+    const closeMinutes = timeStringToMinutes(normalizedCloseTime);
+    if (closeMinutes <= openMinutes) {
+      return jsonError('closeTime must be after openTime', 400);
+    }
   }
 
   const rawMaxGuests = (payload as any).maxGuests;
@@ -372,9 +594,18 @@ async function handleCreate(
   const shortCode = await generateUniqueCode(env);
 
   const insertResult = await env.DB.prepare(
-    "INSERT INTO sessions (id, short_code, status, event_name, max_guests) VALUES (?1, ?2, 'active', ?3, ?4)"
+    "INSERT INTO sessions (id, short_code, status, event_name, max_guests, location, contact_info, open_time, close_time) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8)"
   )
-    .bind(sessionId, shortCode, eventName, maxGuests)
+    .bind(
+      sessionId,
+      shortCode,
+      eventName,
+      maxGuests,
+      normalizedLocation,
+      normalizedContactInfo,
+      normalizedOpenTime,
+      normalizedCloseTime
+    )
     .run();
 
   if (insertResult.error) {
@@ -405,6 +636,10 @@ async function handleCreate(
     hostAuthToken: hostCookieValue,
     eventName,
     maxGuests,
+    location: normalizedLocation,
+    contactInfo: normalizedContactInfo,
+    openTime: normalizedOpenTime,
+    closeTime: normalizedCloseTime,
   });
 
   return new Response(body, { status: 200, headers });
@@ -442,6 +677,30 @@ async function handleConnect(request: Request, env: Env, code: string): Promise<
   }
 
   const forwardedRequest = new Request(doUrl.toString(), init);
+
+  return stub.fetch(forwardedRequest);
+}
+
+async function handleSnapshot(request: Request, env: Env, code: string): Promise<Response> {
+  const normalizedCode = code.toUpperCase();
+  const sessionId = await resolveSessionId(env, normalizedCode);
+  if (!sessionId) {
+    return new Response('Session not found', { status: 404 });
+  }
+
+  const id = env.QUEUE_DO.idFromString(sessionId);
+  const stub = env.QUEUE_DO.get(id);
+
+  const headers = new Headers(request.headers);
+  headers.set('x-session-id', sessionId);
+
+  const doUrl = new URL(request.url);
+  doUrl.pathname = '/snapshot';
+
+  const forwardedRequest = new Request(doUrl.toString(), {
+    method: 'GET',
+    headers,
+  });
 
   return stub.fetch(forwardedRequest);
 }
@@ -707,7 +966,7 @@ function applyCors(
   if (isPreflight) {
     headers.set(
       'Access-Control-Allow-Headers',
-      'content-type, cf-connecting-ip, authorization, x-host-auth'
+      'content-type, cf-connecting-ip, authorization, x-host-auth, if-none-match'
     );
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set('Access-Control-Max-Age', '600');

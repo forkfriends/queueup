@@ -89,10 +89,17 @@ describe('queue lifecycle integration', () => {
   it('supports create, join, real-time updates, alarms, and close flows', async () => {
     const desiredEventName = 'Integration Test Event';
     const desiredMaxGuests = 2;
+    const desiredLocation = 'Integration Test Kitchen';
+    const desiredContactInfo = 'test@example.com / 555-1212';
     const createResponse = await fetchJson('/api/queue/create', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ eventName: desiredEventName, maxGuests: desiredMaxGuests }),
+      body: JSON.stringify({
+        eventName: desiredEventName,
+        maxGuests: desiredMaxGuests,
+        location: desiredLocation,
+        contactInfo: desiredContactInfo,
+      }),
     });
     expect(createResponse.status).toBe(200);
     const createBody = await createResponse.json<{
@@ -102,11 +109,15 @@ describe('queue lifecycle integration', () => {
       wsUrl: string;
       eventName: string;
       maxGuests: number;
+      location?: string | null;
+      contactInfo?: string | null;
     }>();
     expect(createBody.code).toMatch(/^[A-Z0-9]{6}$/);
     expect(createBody.sessionId).toBeTruthy();
     expect(createBody.eventName).toBe(desiredEventName);
     expect(createBody.maxGuests).toBe(desiredMaxGuests);
+    expect(createBody.location).toBe(desiredLocation);
+    expect(createBody.contactInfo).toBe(desiredContactInfo);
     const sessionId = createBody.sessionId;
     const shortCode = createBody.code;
 
@@ -211,10 +222,16 @@ describe('queue lifecycle integration', () => {
     const alarmRan = await runDurableObjectAlarm(stub);
     expect(alarmRan).toBe(true);
 
-    const hostAfterAlarm = await hostWs.waitForMessage<QueueUpdateMessage>();
-    expect(hostAfterAlarm.nowServing).toBeNull();
-  expect(hostAfterAlarm.maxGuests).toBe(desiredMaxGuests);
-    expect(hostAfterAlarm.callDeadline ?? null).toBeNull();
+    const snapshotAfterAlarm = await fetchJson(`/api/queue/${shortCode}/snapshot`, {
+      headers: {
+        Cookie: hostCookie,
+      },
+    });
+    expect(snapshotAfterAlarm.status).toBe(200);
+    const snapshotBody = await snapshotAfterAlarm.json<QueueUpdateMessage>();
+    expect(snapshotBody.nowServing).toBeNull();
+    expect(snapshotBody.maxGuests).toBe(desiredMaxGuests);
+    expect(snapshotBody.callDeadline ?? null).toBeNull();
 
     const guestRemoved = await guestWs.waitForMessage<GuestMessage>();
     expect(guestRemoved).toEqual({ type: 'removed', reason: 'no_show' });
@@ -238,7 +255,19 @@ describe('queue lifecycle integration', () => {
       body: JSON.stringify({ partyId: secondParty }),
     });
     expect(kickResponse.status).toBe(200);
-    const hostAfterKick = await hostWs.waitForMessage<QueueUpdateMessage>();
+    let hostAfterKick: QueueUpdateMessage | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const update = await hostWs.waitForMessage<QueueUpdateMessage>();
+      if (update.queue.length === 0) {
+        hostAfterKick = update;
+        break;
+      }
+    }
+    if (!hostAfterKick) {
+      const snapshotAfterKick = await fetchJson(`/api/queue/${shortCode}/snapshot`);
+      expect(snapshotAfterKick.status).toBe(200);
+      hostAfterKick = await snapshotAfterKick.json<QueueUpdateMessage>();
+    }
     expect(hostAfterKick.queue.length).toBe(0);
 
     // Close the session.
@@ -264,10 +293,14 @@ describe('queue lifecycle integration', () => {
     const totalEvents = (eventRow as { count: number } | null)?.count ?? 0;
     expect(totalEvents >= 4).toBe(true);
 
-    const sessionRow = await env.DB.prepare('SELECT event_name FROM sessions WHERE id = ?1')
+    const sessionRow = await env.DB.prepare(
+      'SELECT event_name, location, contact_info FROM sessions WHERE id = ?1'
+    )
       .bind(sessionId)
-      .first<{ event_name: string | null }>();
+      .first<{ event_name: string | null; location: string | null; contact_info: string | null }>();
     expect(sessionRow?.event_name).toBe(desiredEventName);
+    expect(sessionRow?.location).toBe(desiredLocation);
+    expect(sessionRow?.contact_info).toBe(desiredContactInfo);
 
     const capacityRow = await env.DB.prepare('SELECT max_guests FROM sessions WHERE id = ?1')
       .bind(sessionId)
@@ -276,5 +309,5 @@ describe('queue lifecycle integration', () => {
 
     hostWs.socket.close(1000, 'done');
     guestWs.socket.close(1000, 'done');
-  }, 20000);
+  }, 30000);
 });

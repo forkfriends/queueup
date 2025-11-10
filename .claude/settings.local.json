@@ -8,7 +8,10 @@
       "WebFetch(domain:docs.page)",
       "Bash(npx wrangler secret list:*)",
       "Bash(npx wrangler deploy)",
-      "Bash(npx wrangler secret put:*)"
+      "Bash(npx wrangler secret put:*)",
+      "Bash(npm test:*)",
+      "Bash(cat:*)",
+      "Bash(npm run test)"
     ],
     "deny": [],
     "ask": []
