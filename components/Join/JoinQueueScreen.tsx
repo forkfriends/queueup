@@ -694,6 +694,23 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     poll();
   }, [poll]);
 
+  const renderPushBell = () => {
+    if (!isWeb || !partyId || !sessionId) return null;
+    return (
+      <Pressable
+        style={[styles.pushButton, pushReady && styles.pushButtonActive]}
+        onPress={() => void enablePush()}
+      >
+        <Text style={[styles.pushIcon, pushReady && styles.pushIconActive]}>
+          {pushReady ? '🔔✓' : '🔔'}
+        </Text>
+        <Text style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
+          {pushReady ? 'Notifications on' : 'Enable notifications'}
+        </Text>
+      </Pressable>
+    );
+  };
+
   const confirmLeave = useCallback(() => {
     if (!joinedCode || !partyId || leaveLoading) {
       return;
@@ -871,6 +888,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             <View style={styles.resultCard}>
               <Text style={styles.resultText}>{resultText}</Text>
               {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
+              {renderPushBell()}
             </View>
           ) : null}
         </ScrollView>

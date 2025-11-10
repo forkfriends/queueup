@@ -11,6 +11,8 @@ import {
     TouchableOpacity,
 } from 'react-native';
 import { ArrowLeft } from 'lucide-react-native';
+import { Bell, Check } from 'lucide-react-native';
+import { ChevronDown, ChevronUp } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import styles from './GuestQueueScreen.Styles';
@@ -107,6 +109,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [trustSurveyStatus, setTrustSurveyStatus] = useState<'pending' | 'submitted'>('pending');
   const [trustSurveySubmitting, setTrustSurveySubmitting] = useState(false);
   const [eventName, setEventName] = useState<string | null>(null);
+  const [metricsExpanded, setMetricsExpanded] = useState(false);
   const isWeb = Platform.OS === 'web';
 
     // Load eventName from stored joined queue
@@ -795,78 +798,95 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                         });
                       }
                     }}>
+                    <Bell
+                      size={16}
+                      style={pushReady ? styles.pushIconActive : styles.pushIcon}
+                      color={pushReady ? '#fff' : '#1f6feb'}
+                    />
+                    {pushReady ? <Check size={14} color="#fff" /> : null}
                     <Text
                       style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
-                      {pushReady ? 'Notifications On' : 'Enable Browser Alerts'}
+                      {pushReady ? 'Notifications on' : 'Enable notifications'}
                     </Text>
                   </Pressable>
+                ) : null}
+
+                <View style={styles.metricsDivider} />
+
+                <Pressable
+                  style={styles.metricsHeader}
+                  onPress={() => setMetricsExpanded((prev) => !prev)}>
+                  <Text style={styles.sectionTitle}>Queue details</Text>
+                  {metricsExpanded ? (
+                    <ChevronUp size={18} color="#586069" />
+                  ) : (
+                    <ChevronDown size={18} color="#586069" />
+                  )}
+                </Pressable>
+
+                {metricsExpanded ? (
+                  <View>
+                    <View style={styles.metricsGrid}>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Your Position</Text>
+                        <Text style={styles.metricValue}>
+                          {typeof position === 'number' ? `#${position}` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Ahead of You</Text>
+                        <Text style={styles.metricValue}>
+                          {aheadDisplay != null ? `${aheadDisplay}` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Queue Size</Text>
+                        <Text style={styles.metricValue}>
+                          {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Est. Wait</Text>
+                        <Text style={styles.metricValue}>{etaText}</Text>
+                      </View>
+                    </View>
+
+                    {trustSurveyStatus === 'submitted' ? (
+                      <Text style={styles.trustSurveyThanks}>
+                        Thanks for the feedback!
+                      </Text>
+                    ) : (
+                      <>
+                        <Text style={styles.trustSurveyPrompt}>
+                          Does this queue info seem accurate?
+                        </Text>
+                        <View style={styles.trustSurveyButtons}>
+                          <Pressable
+                            style={styles.trustSurveyButtonPrimary}
+                            onPress={() => handleTrustSurveySubmit('yes')}
+                            disabled={trustSurveySubmitting}>
+                            <Text style={styles.trustSurveyButtonText}>Looks good</Text>
+                          </Pressable>
+                          <Pressable
+                            style={styles.trustSurveyButtonSecondary}
+                            onPress={() => handleTrustSurveySubmit('no')}
+                            disabled={trustSurveySubmitting}>
+                            <Text
+                              style={[
+                                styles.trustSurveyButtonText,
+                                styles.trustSurveyButtonTextSecondary,
+                              ]}>
+                              Seems off
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </>
+                    )}
+                  </View>
                 ) : null}
               </>
             ) : null}
             </View>
-
-            {isActive ? (
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Queue Metrics</Text>
-                <View style={styles.metricsGrid}>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Your Position</Text>
-                    <Text style={styles.metricValue}>
-                      {typeof position === 'number' ? `#${position}` : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Ahead of You</Text>
-                    <Text style={styles.metricValue}>
-                      {aheadDisplay != null ? `${aheadDisplay}` : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Queue Size</Text>
-                    <Text style={styles.metricValue}>
-                      {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Est. Wait</Text>
-                    <Text style={styles.metricValue}>{etaText}</Text>
-                  </View>
-                </View>
-              </View>
-            ) : null}
-
-            {isActive ? (
-              <View style={styles.card}>
-                {trustSurveyStatus === 'submitted' ? (
-                  <Text style={styles.trustSurveyThanks}>
-                    Thanks for the feedback!
-                  </Text>
-                ) : (
-                  <>
-                    <Text style={styles.trustSurveyPrompt}>
-                      Does this queue info seem accurate?
-                    </Text>
-                    <View style={styles.trustSurveyButtons}>
-                      <Pressable
-                        style={styles.trustSurveyButtonPrimary}
-                        onPress={() => handleTrustSurveySubmit('yes')}
-                        disabled={trustSurveySubmitting}>
-                        <Text style={styles.trustSurveyButtonText}>Looks good</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.trustSurveyButtonSecondary}
-                        onPress={() => handleTrustSurveySubmit('no')}
-                        disabled={trustSurveySubmitting}>
-                        <Text
-                          style={[styles.trustSurveyButtonText, styles.trustSurveyButtonTextSecondary]}>
-                          Seems off
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </>
-                )}
-              </View>
-            ) : null}
 
             <View style={styles.card}>
             <Text style={styles.sectionTitle}>Your Party</Text>
