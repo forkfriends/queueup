@@ -1,7 +1,7 @@
 const POSTER_WIDTH = 1080;
 const POSTER_HEIGHT = 1920;
 const QR_SIZE = 512;
-const LOGO_PATH = '/icon-black.svg';
+const LOGO_PATH = '/queueup/icon-black.svg';
 const FONT_FAMILY = 'Plus Jakarta Sans, "Helvetica Neue", "Segoe UI", sans-serif';
 
 const GRADIENT_SETS: [string, string, number][] = [
