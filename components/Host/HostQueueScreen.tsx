@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -13,12 +13,9 @@ import {
   View,
   type GestureResponderEvent,
 } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import * as FileSystem from 'expo-file-system';
 import * as Clipboard from 'expo-clipboard';
-import * as MediaLibrary from 'expo-media-library';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './HostQueueScreen.Styles';
 import {
@@ -28,10 +25,46 @@ import {
   buildHostConnectUrl,
 } from '../../lib/backend';
 import { Feather } from '@expo/vector-icons';
+import { ArrowLeft } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
+import { trackEvent } from '../../utils/analytics';
+import { generatePosterImage } from './posterGenerator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
+
+const ANALYTICS_SCREEN = 'host_console';
+
+function formatTimeLabel(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 === 0 ? 12 : hours % 12;
+  const minuteString = minutes.toString().padStart(2, '0');
+  return `${displayHours}:${minuteString} ${period}`;
+}
+
+function formatScheduleLine(openTime?: string | null, closeTime?: string | null): string | null {
+  const openLabel = formatTimeLabel(openTime);
+  const closeLabel = formatTimeLabel(closeTime);
+  if (openLabel && closeLabel) {
+    return `${openLabel} – ${closeLabel}`;
+  }
+  if (openLabel) {
+    return `Opens ${openLabel}`;
+  }
+  if (closeLabel) {
+    return `Closes ${closeLabel}`;
+  }
+  return null;
+}
 
 type HostMessage =
   | {
@@ -45,15 +78,8 @@ type HostMessage =
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
 
+const POLL_INTERVAL_MS = 10000; // Poll every 10 seconds
 const RECONNECT_DELAY_MS = 3000;
-
-type QRCodeRef = {
-  toDataURL?: (callback: (data: string) => void) => void;
-};
-
-type MediaPermissionOutcome =
-  | { status: 'granted'; access: MediaLibrary.PermissionResponse['accessPrivileges'] | undefined }
-  | { status: 'denied' | 'blocked' };
 
 export default function HostQueueScreen({ route, navigation }: Props) {
   // Override the back button behavior to go to HomeScreen
@@ -62,11 +88,15 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       headerLeft: () => (
         <Pressable
           onPress={() => navigation.navigate('HomeScreen')}
-          style={({ pressed }) => [
-            { opacity: pressed ? 0.7 : 1 },
-            { marginLeft: 10 }
-          ]}>
-          <Text style={{ color: '#007AFF', fontSize: 17 }}>Home</Text>
+          accessibilityRole="button"
+          accessibilityLabel="Go home"
+          hitSlop={12}
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.6 : 1,
+            padding: 8,
+            marginLeft: 8,
+          })}>
+          <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
         </Pressable>
       ),
     });
@@ -80,10 +110,15 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     joinUrl,
     eventName,
     maxGuests: initialMaxGuests,
+    location,
+    contactInfo,
+    openTime,
+    closeTime,
   } = route.params;
   const storageKey = `queueup-host-auth:${sessionId}`;
 
   const displayEventName = eventName?.trim() || null;
+  const scheduleLine = useMemo(() => formatScheduleLine(openTime, closeTime), [openTime, closeTime]);
   const [capacity, setCapacity] = useState<number | null>(
     typeof initialMaxGuests === 'number' ? initialMaxGuests : null
   );
@@ -100,6 +135,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectionErrorModalVisible, setConnectionErrorModalVisible] = useState(false);
   const [queue, setQueue] = useState<HostParty[]>([]);
   const [nowServing, setNowServing] = useState<HostParty | null>(null);
   const [callDeadline, setCallDeadline] = useState<number | null>(null);
@@ -109,11 +145,23 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const [closeConfirmVisibleWeb, setCloseConfirmVisibleWeb] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const isWeb = Platform.OS === 'web';
-  const [savingQr, setSavingQr] = useState(false);
+  const [posterModeLoading, setPosterModeLoading] = useState<'color' | 'bw' | null>(null);
+  const [posterModalVisible, setPosterModalVisible] = useState(false);
+  const [posterImageUrl, setPosterImageUrl] = useState<string | null>(null);
+  const [posterBlackWhite, setPosterBlackWhite] = useState(false);
+  const [posterGenerating, setPosterGenerating] = useState(false);
+  const canGeneratePoster = isWeb;
 
-  const socketRef = useRef<WebSocket | null>(null);
+  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const qrCodeRef = useRef<QRCodeRef | null>(null);
+  const etag = useRef<string | null>(null);
+  const hasInitializedQueue = useRef(false);
+
+  // Clear ETag when entering a new queue session to ensure fresh data
+  useEffect(() => {
+    etag.current = null;
+    hasInitializedQueue.current = false;
+  }, [code, sessionId]);
 
   useEffect(() => {
     if (!initialHostAuthToken) {
@@ -132,6 +180,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           joinUrl,
           eventName,
           maxGuests: initialMaxGuests,
+          location,
+          contactInfo,
+          openTime,
+          closeTime,
           createdAt: Date.now(),
         });
       } catch {
@@ -140,11 +192,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     })();
   }, [initialHostAuthToken, storageKey, code, sessionId, wsUrl, joinUrl, eventName, initialMaxGuests]);
 
-  const webSocketUrl = useMemo(() => buildHostConnectUrl(wsUrl, hostToken), [wsUrl, hostToken]);
+  const snapshotUrl = useMemo(() => {
+    const baseUrl = wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    return baseUrl;
+  }, [wsUrl]);
   const hasHostAuth = Boolean(hostToken);
-  const [mediaPermission, requestMediaPermission, getMediaPermission] = MediaLibrary.usePermissions(
-    Platform.OS === 'android' ? { writeOnly: true } : undefined
-  );
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeout.current) {
@@ -153,39 +205,31 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     }
   }, []);
 
-  const closeSocket = useCallback(() => {
-    if (socketRef.current) {
-      try {
-        socketRef.current.close();
-      } catch {
-        // ignore
-      }
-      socketRef.current = null;
+  const stopPolling = useCallback(() => {
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
     }
   }, []);
 
-  const handleMessage = useCallback((event: MessageEvent) => {
-    if (typeof event.data !== 'string') {
-      return;
-    }
+  const handleSnapshot = useCallback((snapshot: HostMessage) => {
     try {
-      const parsed = JSON.parse(event.data) as HostMessage;
-      if (parsed.type === 'queue_update') {
-        const queueEntries = Array.isArray(parsed.queue) ? (parsed.queue as HostParty[]) : [];
-        const serving = (parsed.nowServing ?? null) as HostParty | null;
+      if (snapshot.type === 'queue_update') {
+        const queueEntries = Array.isArray(snapshot.queue) ? (snapshot.queue as HostParty[]) : [];
+        const serving = (snapshot.nowServing ?? null) as HostParty | null;
         setQueue(queueEntries);
         setNowServing(serving);
-        if (typeof parsed.maxGuests === 'number') {
-          setCapacity(parsed.maxGuests);
+        if (typeof snapshot.maxGuests === 'number') {
+          setCapacity(snapshot.maxGuests);
         }
         const deadlineValue =
-          typeof parsed.callDeadline === 'number' ? parsed.callDeadline : null;
+          typeof snapshot.callDeadline === 'number' ? snapshot.callDeadline : null;
         setCallDeadline(serving ? deadlineValue : null);
         if (queueEntries.length > 0 || serving) {
           setClosed(false);
         }
         setConnectionError(null);
-      } else if (parsed.type === 'closed') {
+      } else if (snapshot.type === 'closed') {
         setQueue([]);
         setNowServing(null);
         setCallDeadline(null);
@@ -196,78 +240,164 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     }
   }, []);
 
-  const connect = useCallback(() => {
+  const poll = useCallback(async () => {
+    if (!hasHostAuth) {
+      return;
+    }
+
+    try {
+      const headers: HeadersInit = {};
+      // Only send If-None-Match if we've already initialized the queue state
+      // This ensures the first poll always fetches data
+      if (etag.current && hasInitializedQueue.current) {
+        headers['If-None-Match'] = etag.current;
+      }
+
+      const response = await fetch(snapshotUrl, { headers });
+
+      if (response.status === 304) {
+        // No changes, connection is healthy
+        // Only skip update if we've already initialized the queue
+        if (hasInitializedQueue.current) {
+          setConnectionState('open');
+          setConnectionError(null);
+          return;
+        }
+        // If we haven't initialized yet, we need to fetch data
+        // Retry without If-None-Match header to force a fresh fetch
+        const retryResponse = await fetch(snapshotUrl);
+        if (retryResponse.ok) {
+          const newEtag = retryResponse.headers.get('ETag');
+          if (newEtag) {
+            etag.current = newEtag;
+          }
+          const data = await retryResponse.json();
+          handleSnapshot(data);
+          hasInitializedQueue.current = true;
+          setConnectionState('open');
+          setConnectionError(null);
+          setConnectionErrorModalVisible(false);
+        }
+        return;
+      }
+
+      if (response.ok) {
+        const newEtag = response.headers.get('ETag');
+        if (newEtag) {
+          etag.current = newEtag;
+        }
+        const data = await response.json();
+        handleSnapshot(data);
+        hasInitializedQueue.current = true;
+        setConnectionState('open');
+        setConnectionError(null);
+        setConnectionErrorModalVisible(false);
+      } else {
+        console.warn('[HostQueueScreen] Poll failed:', response.status);
+        setConnectionError(`Poll failed: ${response.status}`);
+        setConnectionErrorModalVisible(true);
+      }
+    } catch (error) {
+      console.error('[HostQueueScreen] Poll error:', error);
+      setConnectionError('Unable to connect to the server');
+      setConnectionErrorModalVisible(true);
+    }
+  }, [hasHostAuth, snapshotUrl, handleSnapshot]);
+
+  const startPolling = useCallback(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
-      setConnectionError(
-        'Missing host authentication. Reopen the host controls on the device that created this queue.'
-      );
+      setConnectionError('Missing host authentication. Reopen the host controls on the device that created this queue.');
+      setConnectionErrorModalVisible(true);
       return;
     }
 
     clearReconnectTimeout();
-    closeSocket();
+    stopPolling();
     setConnectionState('connecting');
     setConnectionError(null);
 
-    const socket = new WebSocket(webSocketUrl);
-    socketRef.current = socket;
+    console.log('[HostQueueScreen] Starting polling');
 
-    socket.onopen = () => {
-      console.log('[HostQueueScreen] WebSocket open');
-      setConnectionState('open');
-      setConnectionError(null);
-    };
+    // Poll immediately
+    poll();
 
-    socket.onmessage = handleMessage;
+    // Then poll every POLL_INTERVAL_MS
+    pollInterval.current = setInterval(() => {
+      poll();
+    }, POLL_INTERVAL_MS);
+  }, [hasHostAuth, clearReconnectTimeout, stopPolling, poll]);
 
-    socket.onerror = (event) => {
-      console.warn('[HostQueueScreen] WebSocket error', event);
-      setConnectionError('WebSocket error. Attempting to reconnect…');
-    };
-
-    socket.onclose = (event) => {
-      console.log('[HostQueueScreen] WebSocket closed', event.code, event.reason);
-      setConnectionState('closed');
-      if (!closed) {
-        setConnectionError('Connection closed. Attempting to reconnect…');
-      }
-      if (hasHostAuth) {
-        clearReconnectTimeout();
-        reconnectTimeout.current = setTimeout(() => {
-          connect();
-        }, RECONNECT_DELAY_MS);
-      }
-    };
-  }, [hasHostAuth, clearReconnectTimeout, closeSocket, webSocketUrl, handleMessage, closed]);
+  // Immediate poll when entering an already-made queue - ensures we fetch fresh data from DB
+  useEffect(() => {
+    if (!hasHostAuth || !snapshotUrl) {
+      return;
+    }
+    // Poll immediately when we have host auth and snapshot URL ready
+    console.log('[HostQueueScreen] Immediate poll for queue info');
+    poll();
+  }, [hasHostAuth, snapshotUrl, poll]);
 
   useEffect(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
-      setConnectionError(
-        'Missing host authentication. Reopen the host controls on the device that created this queue.'
-      );
+      setConnectionError('Missing host authentication. Reopen the host controls on the device that created this queue.');
+      setConnectionErrorModalVisible(true);
       return;
     }
-    connect();
+    startPolling();
     return () => {
       clearReconnectTimeout();
-      closeSocket();
+      stopPolling();
     };
-  }, [connect, clearReconnectTimeout, closeSocket, hasHostAuth]);
+  }, [startPolling, clearReconnectTimeout, stopPolling, hasHostAuth]);
 
   const queueCount = queue.length;
-  const connectionLabel =
-    connectionState === 'open'
-      ? 'Live'
-      : connectionState === 'connecting'
-        ? 'Connecting…'
-        : 'Disconnected';
   const shareableLink = joinUrl ?? null;
+  const buildPosterDetails = useCallback(() => {
+    const lines: string[] = [];
+    if (displayEventName) {
+      lines.push(displayEventName);
+    } else {
+      lines.push(`Queue ${code}`);
+    }
+    if (scheduleLine && !lines.includes(scheduleLine)) {
+      lines.push(scheduleLine);
+    }
+    if (typeof location === 'string' && location.trim().length > 0) {
+      lines.push(location.trim());
+    }
+    const trimmedContact = typeof contactInfo === 'string' ? contactInfo.trim() : '';
+    const isMeaningfulContact = trimmedContact.length > 0 && 
+      !/^(no|n\/a|none|na|-|--)$/i.test(trimmedContact);
+    if (isMeaningfulContact) {
+      lines.push(trimmedContact);
+    } else if (typeof capacity === 'number') {
+      lines.push(`Max ${capacity} guests`);
+    } else if (!lines.some((line) => line.includes(code))) {
+      lines.push(`Code ${code}`);
+    }
+
+    return lines;
+  }, [capacity, code, contactInfo, displayEventName, location, scheduleLine, shareableLink]);
 
   const disabledAdvance =
     !hasHostAuth || actionLoading || closeLoading || closed || (queueCount === 0 && !nowServing);
   const disabledClose = !hasHostAuth || closeLoading || closed;
+
+  const trackHostAction = useCallback(
+    (event: Parameters<typeof trackEvent>[0], props?: Record<string, unknown>) => {
+      void trackEvent(event, {
+        sessionId,
+        queueCode: code,
+        props: {
+          screen: ANALYTICS_SCREEN,
+          ...(props ?? {}),
+        },
+      });
+    },
+    [code, sessionId]
+  );
 
   const advance = useCallback(
     async (nextPartyId?: string) => {
@@ -288,6 +418,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           setCallDeadline(null);
         }
         setConnectionError(null);
+        trackHostAction(nextPartyId ? 'host_call_specific' : 'host_call_next', {
+          targetPartyId: nextPartyId ?? updatedNowServing?.id ?? null,
+          queueLength: queue.length,
+        });
+        await poll();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to advance queue';
         Alert.alert('Unable to advance', message);
@@ -295,7 +430,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setActionLoading(false);
       }
     },
-    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id]
+    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id, poll, queue.length, trackHostAction]
   );
 
   const advanceSpecific = useCallback(
@@ -346,218 +481,146 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     };
   }, []);
 
-  const handleShareQr = useCallback(async () => {
+
+  const handleGeneratePoster = useCallback(
+    async (mode: 'color' | 'bw', forDownload: boolean = true) => {
+      if (!canGeneratePoster || typeof window === 'undefined') {
+        Alert.alert('Try on web', 'Poster downloads are only available in a web browser.');
+        return null;
+      }
+      if (posterModeLoading) {
+        return null;
+      }
+      const doc = (globalThis as any)?.document;
+      if (!doc) {
+        Alert.alert('Unavailable', 'Poster downloads are only available in a web browser.');
+        return null;
+      }
+      setPosterModeLoading(mode);
+      setPosterGenerating(true);
+      try {
+        const blob = await generatePosterImage({
+          slug: code,
+          joinUrl: shareableLink ?? undefined,
+          detailLines: buildPosterDetails(),
+          blackWhiteMode: mode === 'bw',
+        });
+        
+        if (forDownload) {
+          const objectUrl = URL.createObjectURL(blob);
+          const link = doc.createElement('a');
+          link.href = objectUrl;
+          const suffix = mode === 'bw' ? 'poster-bw' : 'poster';
+          link.download = `queue-${code}-${suffix}.png`;
+          doc.body.appendChild(link);
+          link.click();
+          doc.body.removeChild(link);
+          URL.revokeObjectURL(objectUrl);
+          Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
+          trackHostAction('qr_saved', {
+            platform: Platform.OS,
+            method: 'poster_download',
+            mode,
+          });
+        } else {
+          // For display in modal
+          const objectUrl = URL.createObjectURL(blob);
+          setPosterImageUrl(objectUrl);
+        }
+        
+        return blob;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to generate poster';
+        Alert.alert('Poster failed', message);
+        return null;
+      } finally {
+        setPosterModeLoading(null);
+        setPosterGenerating(false);
+      }
+    },
+    [buildPosterDetails, canGeneratePoster, code, posterModeLoading, shareableLink, trackHostAction]
+  );
+
+  const handleShare = useCallback(async () => {
     if (!shareableLink) {
       return;
     }
     try {
-      await Share.share({
-        message: `Join our queue with code ${code}: ${shareableLink}`,
+      const shareMessage = displayEventName
+        ? `Join this queue: ${displayEventName}\n\n${shareableLink}`
+        : `Join this queue: ${code}\n\n${shareableLink}`;
+      const result = await Share.share({
+        message: shareMessage,
         url: shareableLink,
-        title: 'Join our queue',
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to share QR code.';
-      Alert.alert('Share failed', message);
-    }
-  }, [code, shareableLink]);
-
-  const handleSaveQr = useCallback(async () => {
-    if (!shareableLink || !qrCodeRef.current || savingQr) {
-      if (!qrCodeRef.current) {
-        Alert.alert('QR unavailable', 'Generate the QR code again and try saving.');
-      }
-      return;
-    }
-
-    if (isWeb) {
-      setSavingQr(true);
-      try {
-        if (typeof qrCodeRef.current?.toDataURL !== 'function') {
-          throw new Error('Saving QR codes is not supported on this browser.');
-        }
-
-        const base64 = await new Promise<string>((resolve, reject) => {
-          let settled = false;
-          const timeout = setTimeout(() => {
-            if (!settled) {
-              settled = true;
-              reject(new Error('Timed out generating QR image data.'));
-            }
-          }, 3000);
-
-          try {
-            qrCodeRef.current?.toDataURL?.((data: string) => {
-              if (settled) return;
-              settled = true;
-              clearTimeout(timeout);
-              resolve(data);
-            });
-          } catch (err) {
-            if (!settled) {
-              settled = true;
-              clearTimeout(timeout);
-              reject(err);
-            }
-          }
+      if (result.action === Share.sharedAction) {
+        trackHostAction('qr_shared', {
+          platform: Platform.OS,
+          method: 'native_share',
         });
-
-        const dataUrl = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = objectUrl;
-        link.download = `queue-${code}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(objectUrl);
-        Alert.alert('Saved', 'QR code downloaded. Check your browser downloads.');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unable to download QR code.';
-        Alert.alert('Download failed', message);
-      } finally {
-        setSavingQr(false);
       }
-      return;
-    }
-
-    const ensurePermission = async (): Promise<MediaPermissionOutcome> => {
-      try {
-        let currentPermission = mediaPermission ?? (await getMediaPermission());
-        if (currentPermission?.granted) {
-          return { status: 'granted', access: currentPermission.accessPrivileges };
-        }
-
-        if (!currentPermission || currentPermission.canAskAgain) {
-          const response = await requestMediaPermission();
-          if (response?.granted) {
-            return { status: 'granted', access: response.accessPrivileges };
-          }
-          currentPermission = response;
-        }
-
-        return currentPermission?.canAskAgain === false
-          ? { status: 'blocked' }
-          : { status: 'denied' };
-      } catch (err) {
-        console.warn('Media permission request failed', err);
-        return { status: 'denied' };
-      }
-    };
-
-    const permissionResult = await ensurePermission();
-    if (permissionResult.status !== 'granted') {
-      if (permissionResult.status === 'blocked') {
-        const openSettingsAvailable = typeof Linking.openSettings === 'function';
-        Alert.alert(
-          'Access needed',
-          'Enable photo access in Settings to save the QR code image.',
-          openSettingsAvailable
-            ? [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Open Settings',
-                  onPress: () => {
-                    Linking.openSettings();
-                  },
-                },
-              ]
-            : [{ text: 'OK', style: 'default' }],
-          { cancelable: true }
-        );
-      } else {
-        Alert.alert('Access needed', 'Allow photo library access to save the QR code image.');
-      }
-      return;
-    }
-    const accessLevel = permissionResult.access ?? 'all';
-    const canManageAlbums = accessLevel === 'all';
-
-    setSavingQr(true);
-    try {
-      if (typeof qrCodeRef.current?.toDataURL !== 'function') {
-        throw new Error('Saving QR codes is not supported on this device.');
-      }
-
-      const base64 = await new Promise<string>((resolve, reject) => {
-        let settled = false;
-        const timeout = setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            reject(new Error('Timed out generating QR image data.'));
-          }
-        }, 3000);
-
-        try {
-          qrCodeRef.current?.toDataURL?.((data: string) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeout);
-            resolve(data);
-          });
-        } catch (err) {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timeout);
-            reject(err);
-          }
-        }
-      });
-
-      // Prefer cacheDirectory for temporary storage of the QR code image before moving it to the user's photo library.
-      // cacheDirectory is used because the file only needs to persist long enough to be imported into MediaLibrary,
-      // and using cacheDirectory avoids cluttering documentDirectory with temporary files.
-      // If cacheDirectory is unavailable, fall back to documentDirectory.
-      const directory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
-      if (!directory) {
-        throw new Error('No writable directory available to save the QR code.');
-      }
-      const fileUri = `${directory}queue-${code}.png`;
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      if (!canManageAlbums) {
-        await MediaLibrary.saveToLibraryAsync(fileUri);
-      } else {
-        let asset: MediaLibrary.Asset | null = null;
-        try {
-          asset = await MediaLibrary.createAssetAsync(fileUri);
-        } catch (assetError) {
-          console.warn('createAssetAsync failed, falling back to saveToLibraryAsync', assetError);
-          await MediaLibrary.saveToLibraryAsync(fileUri);
-        }
-
-        if (asset) {
-          try {
-            const album = await MediaLibrary.getAlbumAsync('QueueUp');
-            if (album) {
-              await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-            } else {
-              await MediaLibrary.createAlbumAsync('QueueUp', asset, false);
-            }
-          } catch (albumError) {
-            console.warn('Unable to update QueueUp album', albumError);
-          }
-        }
-      }
-      Alert.alert('Saved', 'QR code saved to your photos.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to save QR code.';
-      Alert.alert('Save failed', message);
-    } finally {
-      setSavingQr(false);
+      console.warn('Failed to share queue link', error);
     }
-  }, [
-    code,
-    getMediaPermission,
-    isWeb,
-    mediaPermission,
-    requestMediaPermission,
-    savingQr,
-    shareableLink,
-  ]);
+  }, [shareableLink, displayEventName, code, trackHostAction]);
+
+  const handleViewQrCode = useCallback(async () => {
+    if (!canGeneratePoster) {
+      Alert.alert('Try on web', 'Poster viewing is only available in a web browser.');
+      return;
+    }
+    setPosterModalVisible(true);
+    setPosterImageUrl(null);
+    // Generate poster in current B&W mode
+    await handleGeneratePoster(posterBlackWhite ? 'bw' : 'color', false);
+  }, [canGeneratePoster, handleGeneratePoster, posterBlackWhite]);
+
+  const handleClosePosterModal = useCallback(() => {
+    setPosterModalVisible(false);
+    if (posterImageUrl) {
+      URL.revokeObjectURL(posterImageUrl);
+      setPosterImageUrl(null);
+    }
+  }, [posterImageUrl]);
+
+  const handleDownloadPoster = useCallback(async () => {
+    if (!posterImageUrl || !canGeneratePoster || typeof window === 'undefined') {
+      return;
+    }
+    const doc = (globalThis as any)?.document;
+    if (!doc) {
+      return;
+    }
+    try {
+      const response = await fetch(posterImageUrl);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = doc.createElement('a');
+      link.href = objectUrl;
+      const suffix = posterBlackWhite ? 'poster-bw' : 'poster';
+      link.download = `queue-${code}-${suffix}.png`;
+      doc.body.appendChild(link);
+      link.click();
+      doc.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+        Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
+        trackHostAction('qr_saved', {
+          platform: Platform.OS,
+          method: 'poster_download',
+          mode: posterBlackWhite ? 'bw' : 'color',
+        });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to download poster';
+      Alert.alert('Download failed', message);
+    }
+  }, [posterImageUrl, canGeneratePoster, posterBlackWhite, code, trackHostAction]);
+
+  const handleToggleBlackWhite = useCallback(async () => {
+    const newMode = !posterBlackWhite;
+    setPosterBlackWhite(newMode);
+    // Regenerate poster with new mode
+    await handleGeneratePoster(newMode ? 'bw' : 'color', false);
+  }, [posterBlackWhite, handleGeneratePoster]);
 
   const performCloseQueue = useCallback(async () => {
     if (!hasHostAuth || closeLoading || !hostToken) {
@@ -570,6 +633,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       setQueue([]);
       setNowServing(null);
       setConnectionError(null);
+      trackHostAction('host_close_queue', {
+        queueLengthBeforeClose: queue.length,
+        nowServing: nowServing?.id ?? null,
+      });
       try {
         // Remove this queue from persistent storage so HomeScreen won't show it anymore
         await storage.removeQueue(code);
@@ -582,13 +649,24 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       } catch (err) {
         console.warn('Failed to remove host auth from storage after close', err);
       }
+      await poll();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to close queue';
       Alert.alert('Unable to close queue', message);
     } finally {
       setCloseLoading(false);
     }
-  }, [closeLoading, code, hasHostAuth, hostToken]);
+  }, [
+    closeLoading,
+    code,
+    hasHostAuth,
+    hostToken,
+    nowServing?.id,
+    poll,
+    queue.length,
+    sessionId,
+    trackHostAction,
+  ]);
 
   const handleCloseQueue = useCallback(() => {
     if (!hasHostAuth || closeLoading) {
@@ -616,15 +694,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
   const cancelCloseQueueWeb = useCallback(() => {
     setCloseConfirmVisibleWeb(false);
-  }, []);
+    trackHostAction('host_close_queue_cancelled');
+  }, [trackHostAction]);
 
-  const reconnectManually = useCallback(
-    (event?: GestureResponderEvent) => {
-      event?.preventDefault();
-      connect();
-    },
-    [connect]
-  );
+  const handleCloseConnectionErrorModal = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+  }, []);
 
   const renderQueueList = () => {
     if (queueCount === 0) {
@@ -666,7 +741,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const content = (
     <>
       <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>Host Console</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>Host Console</Text>
+          <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
+            {closed ? 'Closed' : 'Active'}
+          </Text>
+        </View>
         {displayEventName ? (
           <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
             {displayEventName}
@@ -674,6 +754,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         ) : null}
         {typeof capacity === 'number' ? (
           <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
+        ) : null}
+        {scheduleLine ? (
+          <Text style={styles.headerLine}>{scheduleLine}</Text>
         ) : null}
         <View style={styles.headerCodeRow}>
           <Text style={styles.headerLine}>Queue code:</Text>
@@ -696,84 +779,36 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             Guest link: {shareableLink}
           </Text>
         ) : null} */}
-        <View style={styles.statusRow}>
-          <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
-            {closed ? 'Closed' : 'Active'}
-          </Text>
-          <Text style={styles.connectionText}>Connection: {connectionLabel}</Text>
-        </View>
-        {connectionError ? (
-          <>
-            <Text style={styles.connectionText}>{connectionError}</Text>
-            {hasHostAuth ? (
-              <Pressable style={styles.reconnectButton} onPress={reconnectManually}>
-                <Text style={styles.reconnectButtonText}>Reconnect</Text>
-              </Pressable>
-            ) : null}
-          </>
-        ) : null}
         {!hasHostAuth ? (
           <Text style={styles.connectionText}>
             Host authentication token missing. Create a queue on this device to control it.
           </Text>
         ) : null}
-      </View>
-
-      {shareableLink ? (
-        <View style={styles.qrCard}>
-          <Text style={styles.qrHeading}>Guest QR Code</Text>
-          <View style={styles.qrCodeWrapper}>
-            <QRCode
-              value={shareableLink}
-              size={180}
-              getRef={(ref) => {
-                qrCodeRef.current = ref;
-              }}
-            />
-          </View>
-          <Text style={styles.qrHint}>Have guests scan to join instantly.</Text>
-          <View style={styles.qrActions}>
-            <Pressable style={styles.qrShareButton} onPress={handleShareQr}>
-              <Text style={styles.qrShareText}>Share QR Link</Text>
-            </Pressable>
+        {shareableLink ? (
+          <View style={styles.posterButtons}>
+            {canGeneratePoster ? (
+              <Pressable
+                style={[
+                  styles.posterButton,
+                  posterGenerating ? styles.posterButtonDisabled : undefined,
+                ]}
+                onPress={handleViewQrCode}
+                disabled={posterGenerating}>
+                {posterGenerating ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.posterButtonText}>View QR Code</Text>
+                )}
+              </Pressable>
+            ) : null}
             <Pressable
-              style={[styles.qrSaveButton, savingQr ? styles.qrButtonDisabled : undefined]}
-              onPress={handleSaveQr}
-              disabled={savingQr}>
-              {savingQr ? (
-                <ActivityIndicator color="#111" />
-              ) : (
-                <Text style={styles.qrSaveText}>Save to Photos</Text>
-              )}
+              style={styles.posterButtonSecondary}
+              onPress={handleShare}>
+              <Feather name="share-2" size={18} color="#111" />
+              <Text style={styles.posterButtonSecondaryText}>Share</Text>
             </Pressable>
           </View>
-        </View>
-      ) : null}
-
-      <View style={styles.queueActionsRow}>
-        <Pressable
-          style={[styles.primaryButton, disabledAdvance ? styles.primaryButtonDisabled : undefined]}
-          disabled={disabledAdvance}
-          onPress={advanceCurrent}>
-          {actionLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>
-              {nowServing ? 'Mark Served & Call Next' : 'Call First Party'}
-            </Text>
-          )}
-        </Pressable>
-
-        <Pressable
-          style={styles.destructiveButton}
-          disabled={disabledClose}
-          onPress={handleCloseQueue}>
-          {closeLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Close Queue</Text>
-          )}
-        </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.nowServingCard}>
@@ -790,6 +825,31 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             <Timer targetTimestamp={callDeadline ?? null} label="Time left" compact />
           </View>
         ) : null}
+        <View style={styles.queueActionsRow}>
+          <Pressable
+            style={[styles.primaryButton, disabledAdvance ? styles.primaryButtonDisabled : undefined]}
+            disabled={disabledAdvance}
+            onPress={advanceCurrent}>
+            {actionLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>
+                {nowServing ? 'Mark Served & Call Next' : 'Call First Party'}
+              </Text>
+            )}
+          </Pressable>
+
+          <Pressable
+            style={styles.destructiveButton}
+            disabled={disabledClose}
+            onPress={handleCloseQueue}>
+            {closeLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Close Queue</Text>
+            )}
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.queueCard}>
@@ -833,6 +893,93 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     </Modal>
   ) : null;
 
+  const posterModal = (
+    <Modal
+      visible={posterModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={handleClosePosterModal}>
+      <View style={styles.posterModalBackdrop}>
+        <View style={styles.posterModalCard}>
+          <View style={styles.posterModalHeader}>
+            <Text style={styles.posterModalTitle}>QR Code</Text>
+            <Pressable onPress={handleClosePosterModal} style={styles.posterModalCloseButton}>
+              <Feather name="x" size={24} color="#111" />
+            </Pressable>
+          </View>
+          {posterGenerating ? (
+            <View style={styles.posterModalLoading}>
+              <ActivityIndicator size="large" color="#111" />
+              <Text style={styles.posterModalLoadingText}>Generating poster...</Text>
+            </View>
+          ) : posterImageUrl ? (
+            <>
+              <ScrollView
+                style={styles.posterModalImageContainer}
+                contentContainerStyle={styles.posterModalImageContent}
+                maximumZoomScale={3}
+                minimumZoomScale={0.5}>
+                <View style={styles.posterModalImageWrapper}>
+                  {posterImageUrl ? (
+                    <Image
+                      source={{ uri: posterImageUrl }}
+                      style={styles.posterModalImage}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <Text style={styles.posterModalImagePlaceholder}>Poster preview</Text>
+                  )}
+                </View>
+              </ScrollView>
+              <View style={styles.posterModalControls}>
+                <Pressable
+                  style={styles.posterModalCheckboxContainer}
+                  onPress={handleToggleBlackWhite}>
+                  <View
+                    style={[
+                      styles.posterModalCheckbox,
+                      posterBlackWhite ? styles.posterModalCheckboxChecked : undefined,
+                    ]}>
+                    {posterBlackWhite && <Feather name="check" size={16} color="#fff" />}
+                  </View>
+                  <Text style={styles.posterModalCheckboxLabel}>Black & White</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.posterModalDownloadButton}
+                  onPress={handleDownloadPoster}>
+                  <Feather name="download" size={18} color="#fff" />
+                  <Text style={styles.posterModalDownloadText}>Download</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const connectionErrorModal = (
+    <Modal
+      visible={connectionErrorModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={handleCloseConnectionErrorModal}>
+      <View style={styles.webModalBackdrop}>
+        <View style={styles.webModalCard}>
+          <Text style={styles.webModalTitle}>Connection Error</Text>
+          <Text style={styles.webModalMessage}>
+            {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
+          </Text>
+          <View style={styles.webModalActions}>
+            <Pressable style={styles.webModalCancelButton} onPress={handleCloseConnectionErrorModal}>
+              <Text style={styles.webModalCancelText}>OK</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaProvider style={styles.safe}>
       <ScrollView
@@ -842,6 +989,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         {content}
       </ScrollView>
       {webCloseModal}
+      {posterModal}
+      {connectionErrorModal}
     </SafeAreaProvider>
   );
 }

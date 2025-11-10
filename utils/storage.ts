@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 const ACTIVE_QUEUES_KEY = 'queueup-active-queues';
 const JOINED_QUEUES_KEY = 'queueup-joined-queues';
 const HOST_AUTH_PREFIX = 'queueup-host-auth:';
+const TRUST_SURVEY_PREFIX = 'queueup-trust-survey:';
 
 export type StoredQueue = {
   code: string;
@@ -13,6 +14,10 @@ export type StoredQueue = {
   joinUrl?: string;
   eventName?: string;
   maxGuests?: number;
+  location?: string | null;
+  contactInfo?: string | null;
+  openTime?: string | null;
+  closeTime?: string | null;
   createdAt: number; // timestamp for sorting
 };
 
@@ -22,6 +27,11 @@ export type StoredJoinedQueue = {
   partyId: string;
   eventName?: string;
   joinedAt: number;
+};
+
+export type TrustSurveyResponse = {
+  answer: 'yes' | 'no';
+  submittedAt: number;
 };
 
 export const storage = {
@@ -209,5 +219,60 @@ export const storage = {
     } else {
       await AsyncStorage.setItem(JOINED_QUEUES_KEY, value);
     }
+  },
+
+  async setTrustSurveyResponse(code: string, partyId: string, response: TrustSurveyResponse): Promise<void> {
+    const key = `${TRUST_SURVEY_PREFIX}${code}:${partyId}`;
+    const value = JSON.stringify(response);
+    if (Platform.OS === 'web') {
+      try {
+        window.localStorage.setItem(key, value);
+        return;
+      } catch {
+        await AsyncStorage.setItem(key, value);
+        return;
+      }
+    }
+    await AsyncStorage.setItem(key, value);
+  },
+
+  async getTrustSurveyResponse(code: string, partyId: string): Promise<TrustSurveyResponse | null> {
+    const key = `${TRUST_SURVEY_PREFIX}${code}:${partyId}`;
+    let value: string | null = null;
+    if (Platform.OS === 'web') {
+      try {
+        value = window.localStorage.getItem(key);
+        if (!value) {
+          value = await AsyncStorage.getItem(key);
+        }
+      } catch {
+        value = await AsyncStorage.getItem(key);
+      }
+    } else {
+      value = await AsyncStorage.getItem(key);
+    }
+    if (!value) {
+      return null;
+    }
+    try {
+      return JSON.parse(value) as TrustSurveyResponse;
+    } catch (error) {
+      console.warn('Failed to parse trust survey response', error);
+      return null;
+    }
+  },
+
+  async removeTrustSurveyResponse(code: string, partyId: string): Promise<void> {
+    const key = `${TRUST_SURVEY_PREFIX}${code}:${partyId}`;
+    if (Platform.OS === 'web') {
+      try {
+        window.localStorage.removeItem(key);
+        return;
+      } catch {
+        await AsyncStorage.removeItem(key);
+        return;
+      }
+    }
+    await AsyncStorage.removeItem(key);
   },
 };

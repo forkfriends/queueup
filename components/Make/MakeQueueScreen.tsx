@@ -23,6 +23,7 @@ import * as Location from 'expo-location';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
 import { createQueue } from '../../lib/backend';
+import { trackEvent } from '../../utils/analytics';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 
@@ -34,6 +35,7 @@ const MAPBOX_SEARCH_DEBOUNCE_MS = 400;
 const MIN_LOCATION_QUERY_LENGTH = 3;
 const MAPBOX_TOKEN =
   (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN : undefined) ?? '';
+const ANALYTICS_SCREEN = 'make_queue';
 
 type TimeField = 'open' | 'close';
 type LocationSuggestion = {
@@ -65,6 +67,12 @@ function formatTime(date: Date): string {
 }
 
 function formatTimeInputValue(date: Date): string {
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function serializeTime(date: Date): string {
   const hours = date.getHours().toString().padStart(2, '0');
   const minutes = date.getMinutes().toString().padStart(2, '0');
   return `${hours}:${minutes}`;
@@ -415,11 +423,24 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const onSubmit = async () => {
     if (loading) return;
     const trimmedEventName = eventName.trim();
+    const trimmedLocation = location.trim();
+    const trimmedContact = contact.trim();
     if (!trimmedEventName) {
       Alert.alert('Add event name', 'Please provide a name for this event.');
       return;
     }
     const normalizedMaxGuests = Math.min(MAX_QUEUE_SIZE, Math.max(MIN_QUEUE_SIZE, maxSize));
+    const analyticsProps = {
+      screen: ANALYTICS_SCREEN,
+      maxGuests: normalizedMaxGuests,
+      hasTurnstile: Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY),
+      turnstileTokenPresent: Boolean(turnstileToken),
+    };
+    const openTimeValue = serializeTime(openTime);
+    const closeTimeValue = serializeTime(closeTime);
+    void trackEvent('queue_create_started', {
+      props: analyticsProps,
+    });
     setLoading(true);
 
     console.log('[QueueUp][create] Turnstile token:', turnstileToken ? 'present' : 'MISSING');
@@ -428,6 +449,10 @@ export default function MakeQueueScreen({ navigation }: Props) {
       const created = await createQueue({
         eventName: trimmedEventName,
         maxGuests: normalizedMaxGuests,
+        location: trimmedLocation || undefined,
+        contactInfo: trimmedContact || undefined,
+        openTime: openTimeValue,
+        closeTime: closeTimeValue,
         turnstileToken: turnstileToken ?? undefined,
       });
       if (created.hostAuthToken) {
@@ -440,14 +465,27 @@ export default function MakeQueueScreen({ navigation }: Props) {
             wsUrl: created.wsUrl,
             hostAuthToken: created.hostAuthToken,
             joinUrl: created.joinUrl,
-            eventName: created.eventName,
-            maxGuests: created.maxGuests,
-            createdAt: Date.now(),
-          });
+          eventName: created.eventName,
+          maxGuests: created.maxGuests,
+          location: created.location ?? (trimmedLocation || undefined),
+          contactInfo: created.contactInfo ?? (trimmedContact || undefined),
+          openTime: created.openTime ?? openTimeValue,
+          closeTime: created.closeTime ?? closeTimeValue,
+          createdAt: Date.now()
+        });
         } catch (error) {
           console.warn('Failed to store queue details:', error);
         }
       }
+
+      void trackEvent('queue_create_completed', {
+        sessionId: created.sessionId,
+        queueCode: created.code,
+        props: {
+          ...analyticsProps,
+          code: created.code,
+        },
+      });
 
       // Reset Turnstile for next use
       setTurnstileToken(null);
@@ -463,6 +501,10 @@ export default function MakeQueueScreen({ navigation }: Props) {
         hostAuthToken: created.hostAuthToken,
         eventName: created.eventName ?? trimmedEventName,
         maxGuests: created.maxGuests ?? normalizedMaxGuests,
+        location: created.location ?? (trimmedLocation || undefined),
+        contactInfo: created.contactInfo ?? (trimmedContact || undefined),
+        openTime: created.openTime ?? openTimeValue,
+        closeTime: created.closeTime ?? closeTimeValue,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error creating queue';
@@ -477,6 +519,13 @@ export default function MakeQueueScreen({ navigation }: Props) {
       } else {
         Alert.alert('Unable to create queue', message);
       }
+
+      void trackEvent('queue_create_failed', {
+        props: {
+          ...analyticsProps,
+          reason: message,
+        },
+      });
 
       // Reset Turnstile on error
       setTurnstileToken(null);
@@ -681,7 +730,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
                     console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
                   }}
                   options={{
-                    theme: 'auto',
+                    theme: 'light',
                     size: 'normal',
                   }}
                 />

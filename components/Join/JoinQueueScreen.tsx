@@ -8,7 +8,6 @@ import {
   TextInput,
   Pressable,
   ActivityIndicator,
-  Alert,
   Modal,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
@@ -19,15 +18,20 @@ import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
 import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
+import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
+import { useModal } from '../../contexts/ModalContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
 const MIN_QUEUE_SIZE = 1;
 const MAX_QUEUE_SIZE = 10;
 const DEFAULT_QUEUE_SIZE = 1;
+const POLL_INTERVAL_MS = 10000;
+const ANALYTICS_SCREEN = 'join_queue';
 
 export default function JoinQueueScreen({ navigation, route }: Props) {
+  const { showModal } = useModal();
   const routeCode =
     route.params?.code && route.params.code.trim().length > 0
       ? route.params.code.trim().toUpperCase().slice(-6)
@@ -55,7 +59,8 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scannerActive, setScannerActive] = useState(false);
-  const socketRef = useRef<WebSocket | null>(null);
+  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const etag = useRef<string | null>(null);
   const turnstileRef = useRef<any>(null);
   const inQueue = Boolean(joinedCode && partyId);
   const isWeb = Platform.OS === 'web';
@@ -74,14 +79,57 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const onSubmit = async () => {
     if (loading) return;
     if (inQueue) {
-      Alert.alert('Already in a queue', 'Please leave your current queue before joining another.');
+      showModal({
+        title: 'Already in a queue',
+        message: 'Please leave your current queue before joining another.',
+      });
       return;
     }
     const trimmed = key.trim().toUpperCase();
     if (!trimmed) {
-      Alert.alert('Enter queue code', 'Please enter the queue key to continue.');
+      showModal({
+        title: 'Enter queue code',
+        message: 'Please enter the queue key to continue.',
+      });
       return;
     }
+
+    // Check if already in this specific queue
+    try {
+      const joinedQueues = await storage.getJoinedQueues();
+      const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+      if (alreadyJoined) {
+        showModal({
+          title: 'Already in this queue',
+          message: 'You are already in this queue. Please navigate to your queue spot instead.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', onPress: () => {} },
+            {
+              text: 'Go to Queue',
+              onPress: () => {
+                navigation.navigate('GuestQueueScreen', {
+                  code: trimmed,
+                  sessionId: alreadyJoined.sessionId,
+                  partyId: alreadyJoined.partyId,
+                });
+              },
+            },
+          ],
+        });
+        return;
+      }
+    } catch (error) {
+      console.warn('Failed to check existing queues', error);
+    }
+
+    void trackEvent('join_started', {
+      queueCode: trimmed,
+      props: {
+        partySize,
+        hasName: name.trim().length > 0,
+        turnstileTokenPresent: Boolean(turnstileToken),
+      },
+    });
 
     setLoading(true);
     setResultText(null);
@@ -112,13 +160,24 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           code: trimmed,
         });
       }
+
+      void trackEvent('join_completed', {
+        sessionId: joinResult.sessionId ?? null,
+        partyId: joinResult.partyId,
+        queueCode: trimmed,
+        props: {
+          partySize,
+          queueLength: joinResult.queueLength ?? null,
+          estimatedWaitMs: joinResult.estimatedWaitMs ?? null,
+        },
+      });
       // Store joined queue info
       try {
         await storage.setJoinedQueue({
           code: trimmed,
           sessionId: joinResult.sessionId ?? '',
           partyId: joinResult.partyId,
-          eventName: guestName || undefined,
+          eventName: joinResult.eventName,
           joinedAt: Date.now()
         });
       } catch (storageError) {
@@ -143,13 +202,50 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
 
       // Check if it's a Turnstile verification error
       if (message.includes('Turnstile verification') || message.includes('verification required')) {
-        Alert.alert(
-          'Verification Required',
-          'Please complete the Cloudflare security check above before joining the queue.',
-          [{ text: 'OK' }]
-        );
+        showModal({
+          title: 'Verification Required',
+          message: 'Please complete the Cloudflare security check above before joining the queue.',
+        });
+      } else if (message.includes('already in this queue')) {
+        // Check storage to navigate to existing queue
+        try {
+          const joinedQueues = await storage.getJoinedQueues();
+          const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+          if (alreadyJoined) {
+            showModal({
+              title: 'Already in this queue',
+              message: 'You are already in this queue.',
+              buttons: [
+                { text: 'Cancel', style: 'cancel', onPress: () => {} },
+                {
+                  text: 'Go to Queue',
+                  onPress: () => {
+                    navigation.navigate('GuestQueueScreen', {
+                      code: trimmed,
+                      sessionId: alreadyJoined.sessionId,
+                      partyId: alreadyJoined.partyId,
+                    });
+                  },
+                },
+              ],
+            });
+          } else {
+            showModal({
+              title: 'Already in queue',
+              message: 'You are already in this queue.',
+            });
+          }
+        } catch {
+          showModal({
+            title: 'Already in queue',
+            message: 'You are already in this queue.',
+          });
+        }
       } else {
-        Alert.alert('Unable to join queue', message);
+        showModal({
+          title: 'Unable to join queue',
+          message,
+        });
       }
 
       // Reset Turnstile on error
@@ -175,10 +271,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
 
     if (cameraPermission && !cameraPermission.canAskAgain && !cameraPermission.granted) {
-      Alert.alert(
-        'Camera access needed',
-        'Enable camera permissions in your device settings to scan QR codes.'
-      );
+      showModal({
+        title: 'Camera access needed',
+        message: 'Enable camera permissions in your device settings to scan QR codes.',
+      });
       return;
     }
 
@@ -187,10 +283,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       setScannerVisible(true);
       setScannerActive(true);
     } else {
-      Alert.alert(
-        'Camera access needed',
-        'Enable camera permissions in your device settings to scan QR codes.'
-      );
+      showModal({
+        title: 'Camera access needed',
+        message: 'Enable camera permissions in your device settings to scan QR codes.',
+      });
     }
   };
 
@@ -204,7 +300,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
 
     setScannerActive(false);
-    setKey(scanned.toUpperCase().slice(-6)); // use last 6 chars as key
+    const normalized = scanned.toUpperCase().slice(-6);
+    if (normalized) {
+      void trackEvent('qr_scanned', {
+        queueCode: normalized,
+        props: { screen: ANALYTICS_SCREEN },
+      });
+      setKey(normalized);
+    }
     setScannerVisible(false);
   };
 
@@ -215,14 +318,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
   }, []);
 
-  const closeActiveSocket = useCallback(() => {
-    if (socketRef.current) {
-      try {
-        socketRef.current.close(1000, 'client_closed');
-      } catch {
-        // ignore socket close errors
-      }
-      socketRef.current = null;
+  const stopPolling = useCallback(() => {
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
     }
   }, []);
 
@@ -230,7 +329,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     (message?: string) => {
       shouldReconnectRef.current = false;
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
       reconnectAttempt.current = 0;
       setJoinedCode(null);
       setPartyId(null);
@@ -243,8 +342,116 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         setResultText(message);
       }
     },
-    [clearReconnect, closeActiveSocket]
+    [clearReconnect, stopPolling]
   );
+
+  const snapshotUrl = useMemo(() => {
+    if (!joinedCode || !partyId) return null;
+    const wsUrl = buildGuestConnectUrl(joinedCode, partyId);
+    return wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+  }, [joinedCode, partyId]);
+
+  const handleSnapshot = useCallback((data: Record<string, unknown>) => {
+    try {
+      switch (data.type) {
+        case 'position': {
+          const position = Number(data.position);
+          const aheadCount = Number(data.aheadCount);
+          if (!Number.isNaN(position)) {
+            setResultText(
+              aheadCount >= 0
+                ? `You're number ${position} in line. ${aheadCount} ${
+                    aheadCount === 1 ? 'party' : 'parties'
+                  } ahead of you.`
+                : `You're number ${position} in line.`
+            );
+          }
+          break;
+        }
+        case 'called': {
+          setResultText("You're being served now! Please head to the host.");
+          break;
+        }
+        case 'removed': {
+          const reason = data.reason;
+          const reasonMessages: Record<string, string> = {
+            served: 'All set! You have been marked as served.',
+            no_show: "We couldn't reach you, so you were removed from the queue.",
+            kicked: 'The host removed you from the queue.',
+            closed: 'Queue closed. Thanks for your patience!',
+          };
+          const message = reasonMessages[reason as string] ?? 'You have left the queue.';
+          resetSession(message);
+          break;
+        }
+        case 'closed': {
+          resetSession('Queue closed by the host. Thanks for waiting with us!');
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (err) {
+      console.warn('Failed to parse guest snapshot payload', err);
+    }
+  }, [resetSession]);
+
+  const poll = useCallback(async () => {
+    if (!snapshotUrl) {
+      return;
+    }
+
+    try {
+      const headers: HeadersInit = {};
+      if (etag.current) {
+        headers['If-None-Match'] = etag.current;
+      }
+
+      const response = await fetch(snapshotUrl, { headers });
+
+      if (response.status === 304) {
+        // No changes, connection is healthy
+        setConnectionState('open');
+        return;
+      }
+
+      if (response.ok) {
+        const newEtag = response.headers.get('ETag');
+        if (newEtag) {
+          etag.current = newEtag;
+        }
+        const data = await response.json();
+        handleSnapshot(data);
+        setConnectionState('open');
+      } else {
+        console.warn('[JoinQueueScreen] Poll failed:', response.status);
+        setConnectionState('closed');
+      }
+    } catch (error) {
+      console.error('[JoinQueueScreen] Poll error:', error);
+      setConnectionState('closed');
+    }
+  }, [snapshotUrl, handleSnapshot]);
+
+  const startPolling = useCallback(() => {
+    if (!snapshotUrl) {
+      return;
+    }
+
+    clearReconnect();
+    stopPolling();
+    setConnectionState('connecting');
+
+    console.log('[JoinQueueScreen] Starting polling');
+
+    // Poll immediately
+    poll();
+
+    // Then poll every POLL_INTERVAL_MS
+    pollInterval.current = setInterval(() => {
+      poll();
+    }, POLL_INTERVAL_MS);
+  }, [snapshotUrl, clearReconnect, stopPolling, poll]);
 
   useEffect(() => {
     if (!joinedCode || !partyId) {
@@ -252,90 +459,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
 
     shouldReconnectRef.current = true;
-    const wsUrl = buildGuestConnectUrl(joinedCode, partyId);
-
-    const connect = () => {
-      clearReconnect();
-      closeActiveSocket();
-      setConnectionState('connecting');
-
-      const socket = new WebSocket(wsUrl);
-      socketRef.current = socket;
-      socket.onopen = () => {
-        setConnectionState('open');
-      };
-      socket.onmessage = (event) => {
-        if (typeof event.data !== 'string') return;
-        try {
-          const data = JSON.parse(event.data) as Record<string, unknown>;
-          switch (data.type) {
-            case 'position': {
-              const position = Number(data.position);
-              const aheadCount = Number(data.aheadCount);
-              if (!Number.isNaN(position)) {
-                setResultText(
-                  aheadCount >= 0
-                    ? `You're number ${position} in line. ${aheadCount} ${
-                        aheadCount === 1 ? 'party' : 'parties'
-                      } ahead of you.`
-                    : `You're number ${position} in line.`
-                );
-              }
-              break;
-            }
-            case 'called': {
-              setResultText("You're being served now! Please head to the host.");
-              break;
-            }
-            case 'removed': {
-              const reason = data.reason;
-              const reasonMessages: Record<string, string> = {
-                served: 'All set! You have been marked as served.',
-                no_show: "We couldn't reach you, so you were removed from the queue.",
-                kicked: 'The host removed you from the queue.',
-                closed: 'Queue closed. Thanks for your patience!',
-              };
-              const message = reasonMessages[reason as string] ?? 'You have left the queue.';
-              resetSession(message);
-              break;
-            }
-            case 'closed': {
-              resetSession('Queue closed by the host. Thanks for waiting with us!');
-              break;
-            }
-            default:
-              break;
-          }
-        } catch (err) {
-          console.warn('Failed to parse guest WS payload', err);
-        }
-      };
-      socket.onclose = (event) => {
-        if (socketRef.current === socket) {
-          socketRef.current = null;
-        }
-        setConnectionState('closed');
-        if (shouldReconnectRef.current && event.code !== 1000) {
-          clearReconnect();
-          reconnectTimer.current = setTimeout(() => {
-            reconnectAttempt.current += 1;
-            connect();
-          }, 2000);
-        }
-      };
-      socket.onerror = () => {
-        setConnectionState('closed');
-      };
-    };
-
-    connect();
+    startPolling();
 
     return () => {
       shouldReconnectRef.current = false;
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
     };
-  }, [joinedCode, partyId, clearReconnect, closeActiveSocket, resetSession]);
+  }, [joinedCode, partyId, clearReconnect, stopPolling, startPolling]);
 
   const enablePush = useCallback(
     async (options?: { sessionOverride?: string | null; partyOverride?: string | null; silent?: boolean }) => {
@@ -355,13 +486,40 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       const hasNotificationApi = typeof Notification !== 'undefined';
       if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
         setPushMessage('Notifications not supported in this browser.');
+        void trackEvent('push_denied', {
+          sessionId: targetSession,
+          partyId: targetParty,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            auto: Boolean(options?.silent),
+            reason: 'unsupported_capability',
+          },
+        });
         if (!options?.silent) {
-          Alert.alert('Push not supported', 'This browser does not support web push notifications.');
+          showModal({
+            title: 'Push not supported',
+            message: 'This browser does not support web push notifications.',
+          });
         }
         return;
       }
+      const logPushMetric = (
+        event: 'push_prompt_shown' | 'push_granted' | 'push_denied',
+        props?: Record<string, unknown>
+      ) => {
+        void trackEvent(event, {
+          sessionId: targetSession,
+          partyId: targetParty,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            auto: Boolean(options?.silent),
+            ...(props ?? {}),
+          },
+        });
+      };
       try {
         setPushMessage('Enabling notifications…');
+        logPushMetric('push_prompt_shown');
         const publicKey = await getVapidPublicKey();
         if (!publicKey) {
           throw new Error('Missing VAPID key');
@@ -378,6 +536,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         const swScope = isGhPages ? '/queueup/' : '/';
         const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
         let subscription = await registration.pushManager.getSubscription();
+        let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
         const requestPermission = async () => {
           if (Notification.permission === 'granted') {
             return 'granted' as NotificationPermission;
@@ -391,11 +550,12 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           const perm = await requestPermission();
           if (perm !== 'granted') {
             setPushMessage('Notifications are blocked in your browser settings.');
+            logPushMetric('push_denied', { reason: perm });
             if (!options?.silent) {
-              Alert.alert(
-                'Notifications blocked',
-                'Enable notifications in your browser settings to receive alerts.'
-              );
+              showModal({
+                title: 'Notifications blocked',
+                message: 'Enable notifications in your browser settings to receive alerts.',
+              });
             }
             return;
           }
@@ -403,6 +563,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             userVisibleOnly: true,
             applicationServerKey: b64ToU8(publicKey),
           });
+          subscriptionState = 'new';
         }
         await savePushSubscription({
           sessionId: targetSession,
@@ -415,28 +576,40 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           sessionId: targetSession,
           partyId: targetParty,
         });
+        logPushMetric('push_granted', {
+          subscriptionState,
+        });
         setPushReady(true);
         setPushMessage('Notifications on');
         if (!options?.silent) {
-          Alert.alert('Notifications enabled', 'We will alert you when it is your turn.');
+          showModal({
+            title: 'Notifications enabled',
+            message: 'We will alert you when it is your turn.',
+          });
         }
       } catch (e) {
         console.warn('enablePush failed', e);
+        logPushMetric('push_denied', {
+          reason: e instanceof Error ? e.message : 'unknown_error',
+        });
         setPushMessage('Unable to enable notifications right now.');
         if (!options?.silent) {
-          Alert.alert('Failed to enable push', 'Please try again in a moment.');
+          showModal({
+            title: 'Failed to enable push',
+            message: 'Please try again in a moment.',
+          });
         }
       }
     },
-    [partyId, sessionId]
+    [partyId, sessionId, showModal]
   );
 
   useEffect(() => {
     return () => {
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
     };
-  }, [clearReconnect, closeActiveSocket]);
+  }, [clearReconnect, stopPolling]);
 
   useEffect(() => {
     if (!isWeb || !sessionId || !partyId || pushReady) {
@@ -472,15 +645,19 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setLeaveLoading(true);
     try {
       await leaveQueue({ code: joinedCode, partyId });
+      await poll();
       resetSession('You have left the queue.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave queue';
-      Alert.alert('Unable to leave queue', message);
+      showModal({
+        title: 'Unable to leave queue',
+        message,
+      });
     } finally {
       setLeaveConfirmVisibleWeb(false);
       setLeaveLoading(false);
     }
-  }, [joinedCode, partyId, resetSession]);
+  }, [joinedCode, partyId, poll, resetSession]);
 
   const cancelLeaveWeb = useCallback(() => {
     if (leaveLoading) {
@@ -497,11 +674,15 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       setLeaveConfirmVisibleWeb(true);
       return;
     }
-    Alert.alert('Leave queue?', 'You will lose your place in line.', [
-      { text: 'Stay', style: 'cancel' },
-      { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
-    ]);
-  }, [joinedCode, partyId, leaveLoading, performLeave, isWeb]);
+    showModal({
+      title: 'Leave queue?',
+      message: 'You will lose your place in line.',
+      buttons: [
+        { text: 'Stay', style: 'cancel', onPress: () => {} },
+        { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
+      ],
+    });
+  }, [joinedCode, partyId, leaveLoading, performLeave, isWeb, showModal]);
 
   const webLeaveModal = isWeb ? (
     <Modal
@@ -610,7 +791,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
                     console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
                   }}
                   options={{
-                    theme: 'auto',
+                    theme: 'light',
                     size: 'normal',
                   }}
                 />
@@ -662,9 +843,6 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             <View style={styles.resultCard}>
               <Text style={styles.resultText}>{resultText}</Text>
               {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
-              {isWeb && inQueue && pushMessage ? (
-                <Text style={styles.resultHint}>{pushMessage}</Text>
-              ) : null}
             </View>
           ) : null}
         </ScrollView>

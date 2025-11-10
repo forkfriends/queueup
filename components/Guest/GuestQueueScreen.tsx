@@ -8,7 +8,9 @@ import {
     ScrollView,
     Text,
     View,
+    TouchableOpacity,
 } from 'react-native';
+import { ArrowLeft } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import styles from './GuestQueueScreen.Styles';
@@ -20,12 +22,16 @@ import {
   leaveQueue,
   savePushSubscription,
 } from '../../lib/backend';
+import { trackEvent, trackTrustSurveySubmitted } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
+import { useModal } from '../../contexts/ModalContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
 
 const MS_PER_MINUTE = 60 * 1000;
+const POLL_INTERVAL_MS = 10000;
+const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
     // Override the back button behavior to go to HomeScreen
@@ -34,16 +40,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             headerLeft: () => (
                 <Pressable
                     onPress={() => navigation.navigate('HomeScreen')}
-                    style={({ pressed }) => [
-                        { opacity: pressed ? 0.7 : 1 },
-                        { marginLeft: 10 }
-                    ]}>
-                    <Text style={{ color: '#007AFF', fontSize: 17 }}>Home</Text>
+                    accessibilityRole="button"
+                    accessibilityLabel="Go home"
+                    hitSlop={12}
+                    style={({ pressed }) => ({
+                        opacity: pressed ? 0.6 : 1,
+                        padding: 8,
+                        marginLeft: 8,
+                    })}>
+                    <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
                 </Pressable>
             ),
         });
     }, [navigation]);
-
+    const { showModal } = useModal();
     const {
         code,
         partyId,
@@ -93,12 +103,33 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [called, setCalled] = useState(false);
   const [callDeadline, setCallDeadline] = useState<number | null>(null);
-    const isWeb = Platform.OS === 'web';
+  const [trustSurveyStatus, setTrustSurveyStatus] = useState<'pending' | 'submitted'>('pending');
+  const [trustSurveyAnswer, setTrustSurveyAnswer] = useState<'yes' | 'no' | null>(null);
+  const [trustSurveySubmitting, setTrustSurveySubmitting] = useState(false);
+  const [eventName, setEventName] = useState<string | null>(null);
+  const isWeb = Platform.OS === 'web';
 
-    const socketRef = useRef<WebSocket | null>(null);
+    // Load eventName from stored joined queue
+    useEffect(() => {
+        const loadEventName = async () => {
+            try {
+                const joinedQueues = await storage.getJoinedQueues();
+                const joinedQueue = joinedQueues.find(q => q.code === code);
+                if (joinedQueue?.eventName) {
+                    setEventName(joinedQueue.eventName);
+                }
+            } catch (error) {
+                console.warn('Failed to load event name from storage', error);
+            }
+        };
+        void loadEventName();
+    }, [code]);
+
+    const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const shouldReconnectRef = useRef(true);
     const autoPushAttemptRef = useRef<string | null>(null);
+    const etag = useRef<string | null>(null);
 
     const clearReconnect = useCallback(() => {
         if (reconnectTimer.current) {
@@ -107,14 +138,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         }
     }, []);
 
-    const closeActiveSocket = useCallback(() => {
-        if (socketRef.current) {
-        try {
-            socketRef.current.close(1000, 'client_closed');
-        } catch {
-            // ignore
-        }
-        socketRef.current = null;
+    const stopPolling = useCallback(() => {
+        if (pollInterval.current) {
+        clearInterval(pollInterval.current);
+        pollInterval.current = null;
         }
     }, []);
 
@@ -122,12 +149,11 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         async (message: string) => {
       shouldReconnectRef.current = false;
       clearReconnect();
-      closeActiveSocket();
+      stopPolling();
       setConnectionState('closed');
       setIsActive(false);
       setStatusText(message);
       setCallDeadline(null);
-      // Remove the joined queue from storage when session ends
       try {
         if (code) {
           await storage.removeJoinedQueue(code);
@@ -136,35 +162,17 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         console.warn('Failed to remove joined queue from storage', error);
       }
     },
-    [clearReconnect, closeActiveSocket, code]
+    [clearReconnect, stopPolling, code]
   );
 
-    useEffect(() => {
-        if (!partyId || !code || !isActive) {
-        return undefined;
-        }
-
-        shouldReconnectRef.current = true;
+    const snapshotUrl = useMemo(() => {
+        if (!code || !partyId) return null;
         const wsUrl = buildGuestConnectUrl(code, partyId);
+        return wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    }, [code, partyId]);
 
-        const connect = () => {
-        clearReconnect();
-        closeActiveSocket();
-        setConnectionState('connecting');
-
-        const socket = new WebSocket(wsUrl);
-        socketRef.current = socket;
-
-        socket.onopen = () => {
-            setConnectionState('open');
-        };
-
-        socket.onmessage = (event) => {
-            if (typeof event.data !== 'string') {
-            return;
-            }
-            try {
-            const data = JSON.parse(event.data) as Record<string, unknown>;
+    const handleSnapshot = useCallback((data: Record<string, unknown>) => {
+        try {
             switch (data.type) {
                 case 'position': {
                 const newPosition = Number(data.position);
@@ -173,6 +181,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                     typeof data.queueLength === 'number' ? data.queueLength : null;
                 const newEtaMs =
                     typeof data.estimatedWaitMs === 'number' ? data.estimatedWaitMs : null;
+                const snapshotEventName = typeof data.eventName === 'string' ? data.eventName : null;
+
+                // Update eventName from snapshot if available and not already set
+                if (snapshotEventName && snapshotEventName !== eventName) {
+                    setEventName(snapshotEventName);
+                    // Also update storage
+                    storage.setJoinedQueue({
+                        code,
+                        sessionId: sessionId ?? '',
+                        partyId,
+                        eventName: snapshotEventName,
+                        joinedAt: Date.now(),
+                    }).catch(err => console.warn('Failed to update eventName in storage', err));
+                }
 
                 if (!Number.isNaN(newPosition)) {
                     setPosition(newPosition);
@@ -223,7 +245,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
               const reason = data.reason;
               const reasonMessages: Record<string, string> = {
                 served: 'All set! You have been marked as served.',
-                no_show: "We couldn't reach you, so you were removed from the queue.",
+                no_show:
+                  "Time ran out before you could check in, so we had to release your spot.",
                 kicked: 'The host removed you from the queue.',
                 closed: 'Queue closed. Thanks for your patience!',
                 left: 'You have left the queue.',
@@ -236,6 +259,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
               setQueueLength(null);
               setEstimatedWaitMs(null);
               setCallDeadline(null);
+              setCalled(false);
               endSession(message);
               break;
             }
@@ -253,51 +277,124 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 default:
                 break;
             }
-            } catch (error) {
-            console.warn('Failed to parse guest WS payload', error);
-            }
-        };
+        } catch (error) {
+            console.warn('Failed to parse guest snapshot payload', error);
+        }
+    }, [code, sessionId, partyId, eventName, endSession]);
 
-        socket.onclose = async (event) => {
-            if (socketRef.current === socket) {
-            socketRef.current = null;
+    const poll = useCallback(async () => {
+        if (!snapshotUrl) {
+            return;
+        }
+
+        try {
+            const headers: HeadersInit = {};
+            if (etag.current) {
+                headers['If-None-Match'] = etag.current;
             }
-            setConnectionState('closed');
-            if (shouldReconnectRef.current && event.code !== 1000) {
-                clearReconnect();
-                reconnectTimer.current = setTimeout(() => {
-                    connect();
-                }, 2000);
-            } else if (!shouldReconnectRef.current && code) {
-                // If we're not reconnecting and this is a permanent closure, remove the joined queue
-                try {
-                    await storage.removeJoinedQueue(code);
-                } catch (error) {
-                    console.warn('Failed to remove joined queue from storage on socket close', error);
+
+            const response = await fetch(snapshotUrl, { headers });
+
+            if (response.status === 304) {
+                // No changes, connection is healthy
+                setConnectionState('open');
+                return;
+            }
+
+            if (response.ok) {
+                const newEtag = response.headers.get('ETag');
+                if (newEtag) {
+                    etag.current = newEtag;
                 }
+                const data = await response.json();
+                handleSnapshot(data);
+                setConnectionState('open');
+            } else {
+                console.warn('[GuestQueueScreen] Poll failed:', response.status);
+                setConnectionState('closed');
             }
-        };
-
-        socket.onerror = () => {
+        } catch (error) {
+            console.error('[GuestQueueScreen] Poll error:', error);
             setConnectionState('closed');
-        };
-        };
+        }
+    }, [snapshotUrl, handleSnapshot]);
 
-        connect();
+    const startPolling = useCallback(() => {
+        if (!snapshotUrl) {
+            return;
+        }
+
+        clearReconnect();
+        stopPolling();
+        setConnectionState('connecting');
+
+        console.log('[GuestQueueScreen] Starting polling');
+
+        // Poll immediately
+        poll();
+
+        // Then poll every POLL_INTERVAL_MS
+        pollInterval.current = setInterval(() => {
+            poll();
+        }, POLL_INTERVAL_MS);
+    }, [snapshotUrl, clearReconnect, stopPolling, poll]);
+
+    useEffect(() => {
+        if (!partyId || !code || !isActive) {
+        return undefined;
+        }
+
+        shouldReconnectRef.current = true;
+        startPolling();
 
         return () => {
         shouldReconnectRef.current = false;
         clearReconnect();
-        closeActiveSocket();
+        stopPolling();
         };
-    }, [code, partyId, isActive, clearReconnect, closeActiveSocket]);
+    }, [code, partyId, isActive, clearReconnect, stopPolling, startPolling]);
 
     useEffect(() => {
         return () => {
         clearReconnect();
-        closeActiveSocket();
+        stopPolling();
         };
-    }, [clearReconnect, closeActiveSocket]);
+    }, [clearReconnect, stopPolling]);
+
+    const disablePush = useCallback(async () => {
+        if (Platform.OS !== 'web') {
+            return;
+        }
+        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+            return;
+        }
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            const subscription = await registration.pushManager.getSubscription();
+            if (subscription) {
+                await subscription.unsubscribe();
+                setPushReady(false);
+                setPushMessage(null);
+                showModal({
+                    title: 'Notifications Disabled',
+                    message: 'You will no longer receive browser notifications.',
+                });
+            } else {
+                setPushReady(false);
+                setPushMessage(null);
+                showModal({
+                    title: 'Notifications Disabled',
+                    message: 'Notifications were already disabled.',
+                });
+            }
+        } catch (e) {
+            console.warn('disablePush failed', e);
+            showModal({
+                title: 'Failed to disable notifications',
+                message: 'Please try again in a moment.',
+            });
+        }
+    }, [showModal]);
 
     const enablePush = useCallback(
         async (options?: { silent?: boolean }) => {
@@ -315,13 +412,40 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         const hasNotificationApi = typeof Notification !== 'undefined';
         if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
             setPushMessage('Notifications not supported in this browser.');
+            void trackEvent('push_denied', {
+              sessionId,
+              partyId,
+              props: {
+                screen: ANALYTICS_SCREEN,
+                auto: Boolean(options?.silent),
+                reason: 'unsupported_capability',
+              },
+            });
             if (!options?.silent) {
-            Alert.alert('Push not supported', 'This browser does not support notifications.');
+                showModal({
+                    title: 'Push not supported',
+                    message: 'This browser does not support notifications.',
+                });
             }
             return;
         }
+        const logPushMetric = (
+          event: 'push_prompt_shown' | 'push_granted' | 'push_denied',
+          props?: Record<string, unknown>
+        ) => {
+          void trackEvent(event, {
+            sessionId,
+            partyId,
+            props: {
+              screen: ANALYTICS_SCREEN,
+              auto: Boolean(options?.silent),
+              ...(props ?? {}),
+            },
+          });
+        };
         try {
             setPushMessage('Enabling notifications…');
+            logPushMetric('push_prompt_shown');
             const publicKey = await getVapidPublicKey();
             if (!publicKey) {
             throw new Error('Missing VAPID key');
@@ -341,6 +465,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             const swScope = isGhPages ? '/queueup/' : '/';
             const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
             let subscription = await registration.pushManager.getSubscription();
+            let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
             const requestPermission = async () => {
             if (Notification.permission === 'granted') {
                 return 'granted' as NotificationPermission;
@@ -354,11 +479,12 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             const perm = await requestPermission();
             if (perm !== 'granted') {
                 setPushMessage('Notifications are blocked in your browser settings.');
+                logPushMetric('push_denied', { reason: perm });
                 if (!options?.silent) {
-                Alert.alert(
-                    'Notifications blocked',
-                    'Enable notifications in your browser settings to get alerts.'
-                );
+                    showModal({
+                        title: 'Notifications blocked',
+                        message: 'Enable notifications in your browser settings to get alerts.',
+                    });
                 }
                 return;
             }
@@ -366,6 +492,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 userVisibleOnly: true,
                 applicationServerKey: b64ToU8(publicKey),
             });
+            subscriptionState = 'new';
             }
             await savePushSubscription({
             sessionId,
@@ -378,35 +505,72 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             sessionId,
             partyId,
             });
+            logPushMetric('push_granted', { subscriptionState });
             setPushReady(true);
             setPushMessage('Notifications on');
             if (!options?.silent) {
-            Alert.alert('Notifications enabled', 'We will alert you when it is your turn.');
+                showModal({
+                    title: 'Notifications enabled',
+                    message: 'We will alert you when it is your turn.',
+                });
             }
         } catch (e) {
             console.warn('enablePush failed', e);
+            logPushMetric('push_denied', {
+              reason: e instanceof Error ? e.message : 'unknown_error',
+            });
             setPushMessage('Unable to enable notifications right now.');
             if (!options?.silent) {
-            Alert.alert('Failed to enable push', 'Please try again in a moment.');
+                showModal({
+                    title: 'Failed to enable push',
+                    message: 'Please try again in a moment.',
+                });
             }
         }
         },
-        [partyId, sessionId]
+        [partyId, sessionId, showModal]
     );
 
-    useEffect(() => {
-        if (!isWeb || !sessionId || !partyId || pushReady) {
-        return;
+  useEffect(() => {
+    if (!isWeb || !sessionId || !partyId || pushReady) {
+      return;
+    }
+    const key = `${sessionId}:${partyId}`;
+    if (autoPushAttemptRef.current === key) {
+      return;
+    }
+    autoPushAttemptRef.current = key;
+    enablePush({ silent: true }).catch(() => {
+      // handled through pushMessage state
+    });
+  }, [isWeb, sessionId, partyId, pushReady, enablePush]);
+
+  useEffect(() => {
+    if (!code || !partyId) {
+      return;
+    }
+    let cancelled = false;
+    storage
+      .getTrustSurveyResponse(code, partyId)
+      .then((response) => {
+        if (cancelled) {
+          return;
         }
-        const key = `${sessionId}:${partyId}`;
-        if (autoPushAttemptRef.current === key) {
-        return;
+        if (response) {
+          setTrustSurveyStatus('submitted');
+          setTrustSurveyAnswer(response.answer);
+        } else {
+          setTrustSurveyStatus('pending');
+          setTrustSurveyAnswer(null);
         }
-        autoPushAttemptRef.current = key;
-        enablePush({ silent: true }).catch(() => {
-        // handled through pushMessage state
-        });
-    }, [isWeb, sessionId, partyId, pushReady, enablePush]);
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code, partyId]);
 
     const connectionLabel = useMemo(() => {
         switch (connectionState) {
@@ -423,15 +587,44 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
     const aheadDisplay = aheadCount ?? (typeof position === 'number' ? Math.max(position - 1, 0) : null);
     const queueLengthDisplay = queueLength ?? (typeof position === 'number' ? position : null);
-    const etaText = useMemo(() => {
-        if (estimatedWaitMs == null) {
-        return '—';
-        }
-        if (estimatedWaitMs <= MS_PER_MINUTE) {
-        return '< 1 min';
-        }
-        return `${Math.round(estimatedWaitMs / MS_PER_MINUTE)} min`;
-    }, [estimatedWaitMs]);
+  const etaText = useMemo(() => {
+    if (estimatedWaitMs == null) {
+      return '—';
+    }
+    if (estimatedWaitMs <= MS_PER_MINUTE) {
+      return '< 1 min';
+    }
+    return `${Math.round(estimatedWaitMs / MS_PER_MINUTE)} min`;
+  }, [estimatedWaitMs]);
+
+  const handleTrustSurveySubmit = useCallback(
+    async (answer: 'yes' | 'no') => {
+      if (!code || !partyId || trustSurveySubmitting) {
+        return;
+      }
+      setTrustSurveySubmitting(true);
+      try {
+        await storage.setTrustSurveyResponse(code, partyId, {
+          answer,
+          submittedAt: Date.now(),
+        });
+        setTrustSurveyStatus('submitted');
+        setTrustSurveyAnswer(answer);
+        await trackTrustSurveySubmitted({
+          sessionId,
+          partyId,
+          queueCode: code,
+          answers: { trust: answer },
+          props: { screen: ANALYTICS_SCREEN },
+        });
+      } catch (error) {
+        console.warn('Failed to submit trust survey', error);
+      } finally {
+        setTrustSurveySubmitting(false);
+      }
+    },
+    [code, partyId, sessionId, trustSurveySubmitting]
+  );
 
     const performLeave = useCallback(async () => {
         if (!code || !partyId) {
@@ -439,15 +632,26 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         }
         setLeaveLoading(true);
         try {
+        if (estimatedWaitMs != null) {
+          void trackEvent('abandon_after_eta', {
+            sessionId,
+            partyId,
+            queueCode: code,
+            props: {
+              estimatedWaitMs,
+              position,
+              aheadCount,
+              queueLength,
+              called,
+            },
+          });
+        }
         await leaveQueue({ code, partyId });
-        
-        // Remove from storage
         try {
           await storage.removeJoinedQueue(code);
         } catch (storageError) {
           console.warn('Failed to remove joined queue from storage', storageError);
         }
-
         Alert.alert('Left queue', 'You have left the queue.');
         navigation.replace('HomeScreen');
         } catch (error) {
@@ -457,7 +661,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         setLeaveConfirmVisibleWeb(false);
         setLeaveLoading(false);
         }
-    }, [code, partyId, navigation]);
+    }, [code, partyId, navigation, estimatedWaitMs, sessionId, position, aheadCount, queueLength, called]);
 
     const cancelLeaveWeb = useCallback(() => {
         if (leaveLoading) {
@@ -479,10 +683,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
         ]);
     }, [code, partyId, leaveLoading, performLeave, isWeb]);
-
-    const handleReturnHome = useCallback(() => {
-        navigation.replace('JoinQueueScreen', { id: 'new', code });
-    }, [navigation, code]);
 
     const webLeaveModal = isWeb ? (
         <Modal
@@ -526,59 +726,132 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
             <View style={styles.card}>
             <View style={styles.codeBadge}>
-                <Text style={styles.codeBadgeLabel}>Queue Code</Text>
-                <Text style={styles.codeBadgeValue}>{code}</Text>
+              <View style={styles.codeBadgeTextGroup}>
+                <Text style={styles.codeBadgeLabel}>Queue</Text>
+                <Text style={styles.codeBadgeValue}>{eventName || code}</Text>
+              </View>
+              <View
+                style={[
+                  styles.codeBadgeStatus,
+                  isActive ? styles.codeBadgeStatusActive : styles.codeBadgeStatusComplete,
+                ]}>
+                <Text
+                  style={[
+                    styles.codeBadgeStatusText,
+                    isActive
+                      ? styles.codeBadgeStatusTextActive
+                      : styles.codeBadgeStatusTextComplete,
+                  ]}>
+                  {isActive ? 'Active' : 'Finished'}
+                </Text>
+              </View>
             </View>
             <Text style={styles.statusText}>{statusText}</Text>
             {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
-            <Text style={styles.connectionText}>{connectionLabel}</Text>
-          {called ? <Text style={styles.calledText}>It’s your turn!</Text> : null}
-          {called ? (
-            <View style={styles.timerRow}>
-              <Timer targetTimestamp={callDeadline} label="Time left" compact />
-            </View>
-          ) : null}
-            {isWeb && isActive ? (
-                <Pressable
-                style={[styles.pushButton, pushReady ? styles.pushButtonActive : undefined]}
-                onPress={() => enablePush()}
-                disabled={pushReady}>
-                <Text
-                    style={[styles.pushButtonText, pushReady ? styles.pushButtonTextActive : undefined]}>
-                    {pushReady ? 'Notifications On' : 'Enable Browser Alerts'}
-                </Text>
-                </Pressable>
+            {isActive ? (
+              <>
+                <Text style={styles.connectionText}>{connectionLabel}</Text>
+                {called ? <Text style={styles.calledText}>It’s your turn!</Text> : null}
+                {called ? (
+                  <View style={styles.timerRow}>
+                    <Timer targetTimestamp={callDeadline} label="Time left" compact />
+                  </View>
+                ) : null}
+                {isWeb ? (
+                  <Pressable
+                    style={[styles.pushButton, pushReady && styles.pushButtonActive]}
+                    onPress={async () => {
+                      console.log('[GuestQueueScreen] Notifications button pressed');
+                      console.log('[GuestQueueScreen] pushReady:', pushReady);
+                      console.log('[GuestQueueScreen] sessionId:', sessionId);
+                      console.log('[GuestQueueScreen] partyId:', partyId);
+                      if (pushReady) {
+                        console.log('[GuestQueueScreen] Disabling notifications...');
+                        await disablePush();
+                      } else if (sessionId && partyId) {
+                        console.log('[GuestQueueScreen] Calling enablePush...');
+                        await enablePush();
+                        console.log('[GuestQueueScreen] enablePush completed');
+                      } else {
+                        console.log('[GuestQueueScreen] Not calling enablePush - conditions not met');
+                        showModal({
+                          title: 'Unable to Enable Notifications',
+                          message: 'Please wait for the connection to be established.',
+                        });
+                      }
+                    }}>
+                    <Text
+                      style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
+                      {pushReady ? 'Notifications On' : 'Enable Browser Alerts'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </>
             ) : null}
-            {pushMessage ? <Text style={styles.metaText}>{pushMessage}</Text> : null}
             </View>
 
-            <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Queue Metrics</Text>
-            <View style={styles.metricsGrid}>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Your Position</Text>
-                <Text style={styles.metricValue}>
-                    {typeof position === 'number' ? `#${position}` : '—'}
-                </Text>
+            {isActive ? (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Queue Metrics</Text>
+                <View style={styles.metricsGrid}>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Your Position</Text>
+                    <Text style={styles.metricValue}>
+                      {typeof position === 'number' ? `#${position}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Ahead of You</Text>
+                    <Text style={styles.metricValue}>
+                      {aheadDisplay != null ? `${aheadDisplay}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Queue Size</Text>
+                    <Text style={styles.metricValue}>
+                      {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.metricItem}>
+                    <Text style={styles.metricLabel}>Est. Wait</Text>
+                    <Text style={styles.metricValue}>{etaText}</Text>
+                  </View>
                 </View>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Ahead of You</Text>
-                <Text style={styles.metricValue}>
-                    {aheadDisplay != null ? `${aheadDisplay}` : '—'}
-                </Text>
-                </View>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Queue Size</Text>
-                <Text style={styles.metricValue}>
-                    {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
-                </Text>
-                </View>
-                <View style={styles.metricItem}>
-                <Text style={styles.metricLabel}>Est. Wait</Text>
-                <Text style={styles.metricValue}>{etaText}</Text>
-                </View>
-            </View>
-            </View>
+              </View>
+            ) : null}
+
+            {isActive ? (
+              <View style={styles.card}>
+                {trustSurveyStatus === 'submitted' ? (
+                  <Text style={styles.trustSurveyThanks}>
+                    Thanks for the feedback!
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={styles.trustSurveyPrompt}>
+                      Does this queue info seem accurate?
+                    </Text>
+                    <View style={styles.trustSurveyButtons}>
+                      <Pressable
+                        style={styles.trustSurveyButtonPrimary}
+                        onPress={() => handleTrustSurveySubmit('yes')}
+                        disabled={trustSurveySubmitting}>
+                        <Text style={styles.trustSurveyButtonText}>Looks good</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.trustSurveyButtonSecondary}
+                        onPress={() => handleTrustSurveySubmit('no')}
+                        disabled={trustSurveySubmitting}>
+                        <Text
+                          style={[styles.trustSurveyButtonText, styles.trustSurveyButtonTextSecondary]}>
+                          Seems off
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </>
+                )}
+              </View>
+            ) : null}
 
             <View style={styles.card}>
             <Text style={styles.sectionTitle}>Your Party</Text>
@@ -605,13 +878,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 )}
                 </Pressable>
             </View>
-            ) : (
-            <View style={styles.actions}>
-                <Pressable style={styles.secondaryButton} onPress={handleReturnHome}>
-                <Text style={styles.secondaryButtonText}>Back to Join Screen</Text>
-                </Pressable>
-            </View>
-            )}
+            ) : null}
         </ScrollView>
         {webLeaveModal}
         </SafeAreaProvider>

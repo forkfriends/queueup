@@ -37,6 +37,36 @@ QueueUp is a real-time queueing companion for pop-up events, meet-and-greets, an
   `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.YourTokenHere`  
   Hosts can then search for nearby venues on the Make Queue screen, powered by Mapbox's place data and the device's current location (via Expo Location).
 
+## Custom QR Codes
+
+Generate a branded PNG locally without touching the in-app QR component yet:
+
+```sh
+npm run qr:generate
+```
+
+By default the script encodes `https://queueup-api.danielnwachukwu.workers.dev/queue/XSNV9F`, embeds `public/icon-black.svg` at ~45% of the QR size, auto-fixes SVG logos that lack explicit `width`/`height` attributes (using the viewBox), oversamples vectors before rasterizing (`--logoQuality`), draws a tight custom plaque (≈4 px padding) so dots don’t bleed through, paints a solid white background, outputs a 512×512 PNG to `dist/qr/queueup_qr.png`, and uses high error correction for logo safety.
+
+Turning the script into a poster flow is easy: add `--poster` to the command and it will render a gradient background, white plaque, and your QR inside the poster along with the `QueueUp` brand lockup, truncated event title (first 15 characters only), AM/PM time, and detail lines. The poster is exported by default to `dist/qr/queueup_poster.png`, and you can customize headline colors/text via additional flags:
+
+```sh
+npm run qr:generate -- --poster \
+  --posterTagline "Dinner rush, pop-up, etc" \
+  --posterEventTitle "Dinner Pop-up 2025" \
+  --posterEventTime "09:00-17:00" \
+  --posterGuestLimit "Max. 20 guests" \
+  --posterGradientTop "#ff5e57" \
+  --posterGradientBottom "#6121ff"
+```
+
+Other poster-specific options include `--posterBrandText` (defaults to `QueueUp`), `--posterPlaqueColor`, `--posterTextColor`, `--posterFont`, `--posterWidth`, `--posterHeight`, and `--posterDetails` (in case you want a completely custom bottom block). Event times automatically render as e.g. `09:00 AM – 05:00 PM`, and the brand lockup always paints the inverted logo plus `QueueUp` at the very top of the poster.
+
+```sh
+npm run qr:generate -- --poster --posterTitle "Join the queue" --posterDetails "Dinner rush, pop-up, etc|09:00 - 17:00|Queue XSNV9F|Max. 20 guests" --posterGradientTop "#ff5e57" --posterGradientBottom "#6121ff"
+```
+
+Use `node scripts/generate-qr.cjs --help` to see every option (custom URL, dot styles, logo scaling, poster text, gradients, etc.).
+
 ## change
 
 ## Backend Setup
