@@ -241,12 +241,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, []);
 
   const poll = useCallback(async () => {
-    if (!hasHostAuth) {
+    if (!hasHostAuth || !hostToken) {
       return;
     }
 
     try {
-      const headers: HeadersInit = {};
+      const headers: HeadersInit = {
+        'x-host-auth': hostToken,
+      };
       // Only send If-None-Match if we've already initialized the queue state
       // This ensures the first poll always fetches data
       if (etag.current && hasInitializedQueue.current) {
@@ -265,7 +267,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         }
         // If we haven't initialized yet, we need to fetch data
         // Retry without If-None-Match header to force a fresh fetch
-        const retryResponse = await fetch(snapshotUrl);
+        const retryResponse = await fetch(snapshotUrl, {
+          headers: { 'x-host-auth': hostToken },
+        });
         if (retryResponse.ok) {
           const newEtag = retryResponse.headers.get('ETag');
           if (newEtag) {
@@ -302,7 +306,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       setConnectionError('Unable to connect to the server');
       setConnectionErrorModalVisible(true);
     }
-  }, [hasHostAuth, snapshotUrl, handleSnapshot]);
+  }, [hasHostAuth, hostToken, snapshotUrl, handleSnapshot]);
 
   const startPolling = useCallback(() => {
     if (!hasHostAuth) {
