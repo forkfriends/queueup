@@ -606,10 +606,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         ]);
     }, [code, partyId, leaveLoading, performLeave, isWeb]);
 
-    const handleReturnHome = useCallback(() => {
-        navigation.replace('JoinQueueScreen', { id: 'new', code });
-    }, [navigation, code]);
-
     const webLeaveModal = isWeb ? (
         <Modal
         visible={leaveConfirmVisibleWeb}
@@ -788,13 +784,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 )}
                 </Pressable>
             </View>
-            ) : (
-            <View style={styles.actions}>
-                <Pressable style={styles.secondaryButton} onPress={handleReturnHome}>
-                <Text style={styles.secondaryButtonText}>Back to Join Screen</Text>
-                </Pressable>
-            </View>
-            )}
+            ) : null}
         </ScrollView>
         {webLeaveModal}
         </SafeAreaProvider>
