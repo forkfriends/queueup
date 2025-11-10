@@ -8,7 +8,6 @@ import {
   TextInput,
   Pressable,
   ActivityIndicator,
-  Alert,
   Modal,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
@@ -21,6 +20,7 @@ import styles from './JoinQueueScreen.Styles';
 import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL } from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
+import { useModal } from '../../contexts/ModalContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -31,6 +31,7 @@ const POLL_INTERVAL_MS = 10000;
 const ANALYTICS_SCREEN = 'join_queue';
 
 export default function JoinQueueScreen({ navigation, route }: Props) {
+  const { showModal } = useModal();
   const routeCode =
     route.params?.code && route.params.code.trim().length > 0
       ? route.params.code.trim().toUpperCase().slice(-6)
@@ -78,13 +79,47 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const onSubmit = async () => {
     if (loading) return;
     if (inQueue) {
-      Alert.alert('Already in a queue', 'Please leave your current queue before joining another.');
+      showModal({
+        title: 'Already in a queue',
+        message: 'Please leave your current queue before joining another.',
+      });
       return;
     }
     const trimmed = key.trim().toUpperCase();
     if (!trimmed) {
-      Alert.alert('Enter queue code', 'Please enter the queue key to continue.');
+      showModal({
+        title: 'Enter queue code',
+        message: 'Please enter the queue key to continue.',
+      });
       return;
+    }
+
+    // Check if already in this specific queue
+    try {
+      const joinedQueues = await storage.getJoinedQueues();
+      const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+      if (alreadyJoined) {
+        showModal({
+          title: 'Already in this queue',
+          message: 'You are already in this queue. Please navigate to your queue spot instead.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', onPress: () => {} },
+            {
+              text: 'Go to Queue',
+              onPress: () => {
+                navigation.navigate('GuestQueueScreen', {
+                  code: trimmed,
+                  sessionId: alreadyJoined.sessionId,
+                  partyId: alreadyJoined.partyId,
+                });
+              },
+            },
+          ],
+        });
+        return;
+      }
+    } catch (error) {
+      console.warn('Failed to check existing queues', error);
     }
 
     void trackEvent('join_started', {
@@ -142,7 +177,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           code: trimmed,
           sessionId: joinResult.sessionId ?? '',
           partyId: joinResult.partyId,
-          eventName: guestName || undefined,
+          eventName: joinResult.eventName,
           joinedAt: Date.now()
         });
       } catch (storageError) {
@@ -167,13 +202,50 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
 
       // Check if it's a Turnstile verification error
       if (message.includes('Turnstile verification') || message.includes('verification required')) {
-        Alert.alert(
-          'Verification Required',
-          'Please complete the Cloudflare security check above before joining the queue.',
-          [{ text: 'OK' }]
-        );
+        showModal({
+          title: 'Verification Required',
+          message: 'Please complete the Cloudflare security check above before joining the queue.',
+        });
+      } else if (message.includes('already in this queue')) {
+        // Check storage to navigate to existing queue
+        try {
+          const joinedQueues = await storage.getJoinedQueues();
+          const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+          if (alreadyJoined) {
+            showModal({
+              title: 'Already in this queue',
+              message: 'You are already in this queue.',
+              buttons: [
+                { text: 'Cancel', style: 'cancel', onPress: () => {} },
+                {
+                  text: 'Go to Queue',
+                  onPress: () => {
+                    navigation.navigate('GuestQueueScreen', {
+                      code: trimmed,
+                      sessionId: alreadyJoined.sessionId,
+                      partyId: alreadyJoined.partyId,
+                    });
+                  },
+                },
+              ],
+            });
+          } else {
+            showModal({
+              title: 'Already in queue',
+              message: 'You are already in this queue.',
+            });
+          }
+        } catch {
+          showModal({
+            title: 'Already in queue',
+            message: 'You are already in this queue.',
+          });
+        }
       } else {
-        Alert.alert('Unable to join queue', message);
+        showModal({
+          title: 'Unable to join queue',
+          message,
+        });
       }
 
       // Reset Turnstile on error
@@ -199,10 +271,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
 
     if (cameraPermission && !cameraPermission.canAskAgain && !cameraPermission.granted) {
-      Alert.alert(
-        'Camera access needed',
-        'Enable camera permissions in your device settings to scan QR codes.'
-      );
+      showModal({
+        title: 'Camera access needed',
+        message: 'Enable camera permissions in your device settings to scan QR codes.',
+      });
       return;
     }
 
@@ -211,10 +283,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       setScannerVisible(true);
       setScannerActive(true);
     } else {
-      Alert.alert(
-        'Camera access needed',
-        'Enable camera permissions in your device settings to scan QR codes.'
-      );
+      showModal({
+        title: 'Camera access needed',
+        message: 'Enable camera permissions in your device settings to scan QR codes.',
+      });
     }
   };
 
@@ -424,7 +496,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           },
         });
         if (!options?.silent) {
-          Alert.alert('Push not supported', 'This browser does not support web push notifications.');
+          showModal({
+            title: 'Push not supported',
+            message: 'This browser does not support web push notifications.',
+          });
         }
         return;
       }
@@ -477,10 +552,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             setPushMessage('Notifications are blocked in your browser settings.');
             logPushMetric('push_denied', { reason: perm });
             if (!options?.silent) {
-              Alert.alert(
-                'Notifications blocked',
-                'Enable notifications in your browser settings to receive alerts.'
-              );
+              showModal({
+                title: 'Notifications blocked',
+                message: 'Enable notifications in your browser settings to receive alerts.',
+              });
             }
             return;
           }
@@ -507,7 +582,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         setPushReady(true);
         setPushMessage('Notifications on');
         if (!options?.silent) {
-          Alert.alert('Notifications enabled', 'We will alert you when it is your turn.');
+          showModal({
+            title: 'Notifications enabled',
+            message: 'We will alert you when it is your turn.',
+          });
         }
       } catch (e) {
         console.warn('enablePush failed', e);
@@ -516,11 +594,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         });
         setPushMessage('Unable to enable notifications right now.');
         if (!options?.silent) {
-          Alert.alert('Failed to enable push', 'Please try again in a moment.');
+          showModal({
+            title: 'Failed to enable push',
+            message: 'Please try again in a moment.',
+          });
         }
       }
     },
-    [partyId, sessionId]
+    [partyId, sessionId, showModal]
   );
 
   useEffect(() => {
@@ -568,7 +649,10 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       resetSession('You have left the queue.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave queue';
-      Alert.alert('Unable to leave queue', message);
+      showModal({
+        title: 'Unable to leave queue',
+        message,
+      });
     } finally {
       setLeaveConfirmVisibleWeb(false);
       setLeaveLoading(false);
@@ -590,11 +674,15 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       setLeaveConfirmVisibleWeb(true);
       return;
     }
-    Alert.alert('Leave queue?', 'You will lose your place in line.', [
-      { text: 'Stay', style: 'cancel' },
-      { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
-    ]);
-  }, [joinedCode, partyId, leaveLoading, performLeave, isWeb]);
+    showModal({
+      title: 'Leave queue?',
+      message: 'You will lose your place in line.',
+      buttons: [
+        { text: 'Stay', style: 'cancel', onPress: () => {} },
+        { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
+      ],
+    });
+  }, [joinedCode, partyId, leaveLoading, performLeave, isWeb, showModal]);
 
   const webLeaveModal = isWeb ? (
     <Modal
@@ -755,9 +843,6 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             <View style={styles.resultCard}>
               <Text style={styles.resultText}>{resultText}</Text>
               {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
-              {isWeb && inQueue && pushMessage ? (
-                <Text style={styles.resultHint}>{pushMessage}</Text>
-              ) : null}
             </View>
           ) : null}
         </ScrollView>

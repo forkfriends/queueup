@@ -42,6 +42,7 @@ export class QueueDO implements DurableObject {
   private pendingPartyId: string | null = null;
   private closed = false;
   private maxGuests = DEFAULT_MAX_GUESTS;
+  private eventName: string | null = null;
   private callDeadline: number | null = null;
   private createdAt: number;
   private lastActivityAt: number;
@@ -170,6 +171,18 @@ export class QueueDO implements DurableObject {
       return this.jsonError('size must be a positive integer', 400);
     }
 
+    // Check if a party with the same name already exists in the queue
+    if (name && name.trim().length > 0) {
+      const normalizedName = name.trim();
+      const existingParty = this.queue.find(p => p.name?.trim() === normalizedName);
+      if (existingParty) {
+        return this.jsonError('You are already in this queue', 409);
+      }
+      if (this.nowServing && this.nowServing.name?.trim() === normalizedName) {
+        return this.jsonError('You are already in this queue', 409);
+      }
+    }
+
     const normalizedSize = typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : 1;
     const totalGuests = this.computeGuestCount();
     if (totalGuests + normalizedSize > this.maxGuests) {
@@ -235,6 +248,7 @@ export class QueueDO implements DurableObject {
       sessionId: this.sessionId,
       queueLength,
       estimatedWaitMs,
+      eventName: this.eventName ?? undefined,
     });
   }
 
@@ -470,6 +484,7 @@ export class QueueDO implements DurableObject {
       guestSnapshot = JSON.stringify({
         type: 'position',
         ...payload,
+        eventName: this.eventName ?? undefined,
       });
     }
 
@@ -885,6 +900,7 @@ export class QueueDO implements DurableObject {
       const message = JSON.stringify({
         type: 'position',
         ...payload,
+        eventName: this.eventName ?? undefined,
       });
       for (const socket of sockets) {
         this.safeSend(socket, message);
@@ -1147,7 +1163,7 @@ export class QueueDO implements DurableObject {
     }
 
     const payload = this.buildGuestPositionPayload(partyId);
-    this.safeSend(socket, JSON.stringify({ type: 'position', ...payload }));
+    this.safeSend(socket, JSON.stringify({ type: 'position', ...payload, eventName: this.eventName ?? undefined }));
   }
 
   private computePosition(partyId: string): { position: number; aheadCount: number } {
@@ -1231,19 +1247,26 @@ export class QueueDO implements DurableObject {
       this.pendingPartyId = stored.pendingPartyId ?? (this.nowServing ? this.nowServing.id : null);
       this.maxGuests = stored.maxGuests ?? DEFAULT_MAX_GUESTS;
       this.callDeadline = stored.callDeadline ?? null;
-      return;
+    } else {
+      await this.loadFromDatabase();
+      await this.persistState();
     }
-
-    await this.loadFromDatabase();
-    await this.persistState();
+    
+    // Always load eventName from database (it's not stored in KV state)
+    const sessionRow = await this.env.DB.prepare(
+      'SELECT event_name FROM sessions WHERE id = ?1'
+    )
+      .bind(this.sessionId)
+      .first<{ event_name?: string | null }>();
+    this.eventName = sessionRow?.event_name ?? null;
   }
 
   private async loadFromDatabase(): Promise<void> {
     const sessionRow = await this.env.DB.prepare(
-      'SELECT status, max_guests FROM sessions WHERE id = ?1'
+      'SELECT status, max_guests, event_name FROM sessions WHERE id = ?1'
     )
       .bind(this.sessionId)
-      .first<{ status: string; max_guests?: number | null }>();
+      .first<{ status: string; max_guests?: number | null; event_name?: string | null }>();
 
     this.closed = sessionRow?.status === 'closed';
     if (typeof sessionRow?.max_guests === 'number' && Number.isFinite(sessionRow.max_guests)) {
@@ -1251,6 +1274,7 @@ export class QueueDO implements DurableObject {
     } else {
       this.maxGuests = DEFAULT_MAX_GUESTS;
     }
+    this.eventName = sessionRow?.event_name ?? null;
 
     const { results } = await this.env.DB.prepare(
       "SELECT id, name, size, joined_at, status, nearby FROM parties WHERE session_id = ?1 AND status IN ('waiting','called') ORDER BY joined_at ASC"

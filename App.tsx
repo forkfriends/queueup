@@ -11,6 +11,7 @@ import JoinQueueScreen from './components/Join/JoinQueueScreen';
 import HostQueueScreen from './components/Host/HostQueueScreen';
 import GuestQueueScreen from './components/Guest/GuestQueueScreen';
 import type { RootStackParamList } from './types/navigation';
+import { ModalProvider } from './contexts/ModalContext';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const GITHUB_URL = 'https://github.com/forkfriends/queueup';
@@ -36,9 +37,10 @@ const headerStyles = StyleSheet.create({
 
 export default function App() {
   return (
-    <NavigationContainer>
-      <StatusBar style="auto" />
-      <Stack.Navigator
+    <ModalProvider>
+      <NavigationContainer>
+        <StatusBar style="auto" />
+        <Stack.Navigator
         initialRouteName="HomeScreen"
         screenOptions={({ navigation, route }) => ({
           headerRight: () => (
@@ -92,5 +94,6 @@ export default function App() {
         />
       </Stack.Navigator>
     </NavigationContainer>
+    </ModalProvider>
   );
 }

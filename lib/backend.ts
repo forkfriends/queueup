@@ -115,6 +115,7 @@ export interface JoinQueueResult {
   sessionId?: string;
   queueLength?: number;
   estimatedWaitMs?: number;
+  eventName?: string;
 }
 
 export async function joinQueue({ code, name, size, turnstileToken }: JoinQueueParams): Promise<JoinQueueResult> {

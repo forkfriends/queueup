@@ -59,7 +59,7 @@ export default StyleSheet.create({
     codeBadgeStatus: {
         paddingHorizontal: 14,
         paddingVertical: 6,
-        borderRadius: 999,
+        borderRadius: 14,
         borderWidth: 1,
     },
     codeBadgeStatusActive: {
@@ -108,12 +108,14 @@ export default StyleSheet.create({
   },
     pushButton: {
         marginTop: 16,
-        alignSelf: 'flex-start',
         paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 10,
+        paddingVertical: 12,
+        borderRadius: 14,
         borderWidth: 1,
         borderColor: '#1f6feb',
+        backgroundColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     pushButtonActive: {
         backgroundColor: '#1f6feb',
@@ -189,12 +191,12 @@ export default StyleSheet.create({
         flex: 1,
         backgroundColor: '#1f6feb',
         paddingVertical: 12,
-        borderRadius: 12,
+        borderRadius: 14,
         alignItems: 'center',
     },
     trustSurveyButtonSecondary: {
         flex: 1,
-        borderRadius: 12,
+        borderRadius: 14,
         paddingVertical: 12,
         alignItems: 'center',
         borderWidth: 1,
@@ -202,7 +204,8 @@ export default StyleSheet.create({
     },
     trustSurveyButtonText: {
         color: '#fff',
-        fontWeight: '700',
+        fontSize: 14,
+        fontWeight: '600',
     },
     trustSurveyButtonTextSecondary: {
         color: '#1f6feb',
@@ -218,7 +221,7 @@ export default StyleSheet.create({
     leaveButton: {
         backgroundColor: '#c1121f',
         borderRadius: 14,
-        paddingVertical: 14,
+        paddingVertical: 12,
         paddingHorizontal: 24,
         alignItems: 'center',
         width: '100%',
@@ -228,20 +231,20 @@ export default StyleSheet.create({
     },
     leaveButtonText: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '600',
     },
     secondaryButton: {
         backgroundColor: '#111',
         borderRadius: 14,
-        paddingVertical: 14,
+        paddingVertical: 12,
         paddingHorizontal: 24,
         alignItems: 'center',
         width: '100%',
     },
     secondaryButtonText: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '600',
     },
     webModalBackdrop: {
@@ -281,28 +284,28 @@ export default StyleSheet.create({
     },
     webModalCancelButton: {
         paddingHorizontal: 18,
-        paddingVertical: 10,
-        borderRadius: 10,
+        paddingVertical: 12,
+        borderRadius: 14,
         borderWidth: 1,
         borderColor: '#ccc',
         backgroundColor: '#f5f5f5',
     },
     webModalCancelText: {
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: '600',
         color: '#111',
     },
     webModalConfirmButton: {
         paddingHorizontal: 18,
-        paddingVertical: 10,
-        borderRadius: 10,
+        paddingVertical: 12,
+        borderRadius: 14,
         backgroundColor: '#c1121f',
     },
     webModalConfirmButtonDisabled: {
         opacity: 0.6,
     },
     webModalConfirmText: {
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: '600',
         color: '#fff',
     },

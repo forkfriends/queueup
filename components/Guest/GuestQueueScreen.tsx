@@ -8,6 +8,7 @@ import {
     ScrollView,
     Text,
     View,
+    TouchableOpacity,
 } from 'react-native';
 import { ArrowLeft } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -24,6 +25,7 @@ import {
 import { trackEvent, trackTrustSurveySubmitted } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
+import { useModal } from '../../contexts/ModalContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
 
@@ -51,6 +53,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             ),
         });
     }, [navigation]);
+    const { showModal } = useModal();
     const {
         code,
         partyId,
@@ -103,7 +106,24 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [trustSurveyStatus, setTrustSurveyStatus] = useState<'pending' | 'submitted'>('pending');
   const [trustSurveyAnswer, setTrustSurveyAnswer] = useState<'yes' | 'no' | null>(null);
   const [trustSurveySubmitting, setTrustSurveySubmitting] = useState(false);
+  const [eventName, setEventName] = useState<string | null>(null);
   const isWeb = Platform.OS === 'web';
+
+    // Load eventName from stored joined queue
+    useEffect(() => {
+        const loadEventName = async () => {
+            try {
+                const joinedQueues = await storage.getJoinedQueues();
+                const joinedQueue = joinedQueues.find(q => q.code === code);
+                if (joinedQueue?.eventName) {
+                    setEventName(joinedQueue.eventName);
+                }
+            } catch (error) {
+                console.warn('Failed to load event name from storage', error);
+            }
+        };
+        void loadEventName();
+    }, [code]);
 
     const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,6 +181,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                     typeof data.queueLength === 'number' ? data.queueLength : null;
                 const newEtaMs =
                     typeof data.estimatedWaitMs === 'number' ? data.estimatedWaitMs : null;
+                const snapshotEventName = typeof data.eventName === 'string' ? data.eventName : null;
+
+                // Update eventName from snapshot if available and not already set
+                if (snapshotEventName && snapshotEventName !== eventName) {
+                    setEventName(snapshotEventName);
+                    // Also update storage
+                    storage.setJoinedQueue({
+                        code,
+                        sessionId: sessionId ?? '',
+                        partyId,
+                        eventName: snapshotEventName,
+                        joinedAt: Date.now(),
+                    }).catch(err => console.warn('Failed to update eventName in storage', err));
+                }
 
                 if (!Number.isNaN(newPosition)) {
                     setPosition(newPosition);
@@ -246,7 +280,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         } catch (error) {
             console.warn('Failed to parse guest snapshot payload', error);
         }
-    }, [endSession]);
+    }, [code, sessionId, partyId, eventName, endSession]);
 
     const poll = useCallback(async () => {
         if (!snapshotUrl) {
@@ -327,6 +361,41 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         };
     }, [clearReconnect, stopPolling]);
 
+    const disablePush = useCallback(async () => {
+        if (Platform.OS !== 'web') {
+            return;
+        }
+        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+            return;
+        }
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            const subscription = await registration.pushManager.getSubscription();
+            if (subscription) {
+                await subscription.unsubscribe();
+                setPushReady(false);
+                setPushMessage(null);
+                showModal({
+                    title: 'Notifications Disabled',
+                    message: 'You will no longer receive browser notifications.',
+                });
+            } else {
+                setPushReady(false);
+                setPushMessage(null);
+                showModal({
+                    title: 'Notifications Disabled',
+                    message: 'Notifications were already disabled.',
+                });
+            }
+        } catch (e) {
+            console.warn('disablePush failed', e);
+            showModal({
+                title: 'Failed to disable notifications',
+                message: 'Please try again in a moment.',
+            });
+        }
+    }, [showModal]);
+
     const enablePush = useCallback(
         async (options?: { silent?: boolean }) => {
         if (Platform.OS !== 'web') {
@@ -353,7 +422,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
               },
             });
             if (!options?.silent) {
-            Alert.alert('Push not supported', 'This browser does not support notifications.');
+                showModal({
+                    title: 'Push not supported',
+                    message: 'This browser does not support notifications.',
+                });
             }
             return;
         }
@@ -409,10 +481,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 setPushMessage('Notifications are blocked in your browser settings.');
                 logPushMetric('push_denied', { reason: perm });
                 if (!options?.silent) {
-                Alert.alert(
-                    'Notifications blocked',
-                    'Enable notifications in your browser settings to get alerts.'
-                );
+                    showModal({
+                        title: 'Notifications blocked',
+                        message: 'Enable notifications in your browser settings to get alerts.',
+                    });
                 }
                 return;
             }
@@ -437,7 +509,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             setPushReady(true);
             setPushMessage('Notifications on');
             if (!options?.silent) {
-            Alert.alert('Notifications enabled', 'We will alert you when it is your turn.');
+                showModal({
+                    title: 'Notifications enabled',
+                    message: 'We will alert you when it is your turn.',
+                });
             }
         } catch (e) {
             console.warn('enablePush failed', e);
@@ -446,11 +521,14 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             });
             setPushMessage('Unable to enable notifications right now.');
             if (!options?.silent) {
-            Alert.alert('Failed to enable push', 'Please try again in a moment.');
+                showModal({
+                    title: 'Failed to enable push',
+                    message: 'Please try again in a moment.',
+                });
             }
         }
         },
-        [partyId, sessionId]
+        [partyId, sessionId, showModal]
     );
 
   useEffect(() => {
@@ -649,8 +727,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             <View style={styles.card}>
             <View style={styles.codeBadge}>
               <View style={styles.codeBadgeTextGroup}>
-                <Text style={styles.codeBadgeLabel}>Queue Code</Text>
-                <Text style={styles.codeBadgeValue}>{code}</Text>
+                <Text style={styles.codeBadgeLabel}>Queue</Text>
+                <Text style={styles.codeBadgeValue}>{eventName || code}</Text>
               </View>
               <View
                 style={[
@@ -681,16 +759,33 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 ) : null}
                 {isWeb ? (
                   <Pressable
-                    style={[styles.pushButton, pushReady ? styles.pushButtonActive : undefined]}
-                    onPress={() => enablePush()}
-                    disabled={pushReady}>
+                    style={[styles.pushButton, pushReady && styles.pushButtonActive]}
+                    onPress={async () => {
+                      console.log('[GuestQueueScreen] Notifications button pressed');
+                      console.log('[GuestQueueScreen] pushReady:', pushReady);
+                      console.log('[GuestQueueScreen] sessionId:', sessionId);
+                      console.log('[GuestQueueScreen] partyId:', partyId);
+                      if (pushReady) {
+                        console.log('[GuestQueueScreen] Disabling notifications...');
+                        await disablePush();
+                      } else if (sessionId && partyId) {
+                        console.log('[GuestQueueScreen] Calling enablePush...');
+                        await enablePush();
+                        console.log('[GuestQueueScreen] enablePush completed');
+                      } else {
+                        console.log('[GuestQueueScreen] Not calling enablePush - conditions not met');
+                        showModal({
+                          title: 'Unable to Enable Notifications',
+                          message: 'Please wait for the connection to be established.',
+                        });
+                      }
+                    }}>
                     <Text
-                      style={[styles.pushButtonText, pushReady ? styles.pushButtonTextActive : undefined]}>
+                      style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
                       {pushReady ? 'Notifications On' : 'Enable Browser Alerts'}
                     </Text>
                   </Pressable>
                 ) : null}
-                {pushMessage ? <Text style={styles.metaText}>{pushMessage}</Text> : null}
               </>
             ) : null}
             </View>
@@ -727,22 +822,21 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
             {isActive ? (
               <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Quick Trust Check</Text>
                 {trustSurveyStatus === 'submitted' ? (
                   <Text style={styles.trustSurveyThanks}>
-                    Thanks! You answered “{trustSurveyAnswer === 'yes' ? 'Yes' : 'Not yet'}”.
+                    Thanks for the feedback!
                   </Text>
                 ) : (
                   <>
                     <Text style={styles.trustSurveyPrompt}>
-                      Does this live status feel trustworthy so far?
+                      Does this queue info seem accurate?
                     </Text>
                     <View style={styles.trustSurveyButtons}>
                       <Pressable
                         style={styles.trustSurveyButtonPrimary}
                         onPress={() => handleTrustSurveySubmit('yes')}
                         disabled={trustSurveySubmitting}>
-                        <Text style={styles.trustSurveyButtonText}>Yep</Text>
+                        <Text style={styles.trustSurveyButtonText}>Looks good</Text>
                       </Pressable>
                       <Pressable
                         style={styles.trustSurveyButtonSecondary}
@@ -750,7 +844,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                         disabled={trustSurveySubmitting}>
                         <Text
                           style={[styles.trustSurveyButtonText, styles.trustSurveyButtonTextSecondary]}>
-                          Not yet
+                          Seems off
                         </Text>
                       </Pressable>
                     </View>

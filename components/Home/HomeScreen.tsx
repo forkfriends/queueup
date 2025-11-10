@@ -105,9 +105,14 @@ export default function HomeScreen({ navigation }: Props) {
     <SafeAreaProvider style={styles.safe}>
       <View style={styles.container}>
 
-        <Text style={styles.title}>Welcome to{'\n'}ForkFriends!</Text>
-
-        <Image source={require('@assets/ff_logo.png')} style={styles.logo} resizeMode="contain" />
+        <View style={styles.titleContainer}>
+          {Platform.OS === 'web' ? (
+            <Image source={{ uri: '/icon-black.svg' }} style={styles.logoIcon} resizeMode="contain" />
+          ) : (
+            <Image source={require('@assets/ff_logo.png')} style={styles.logoIcon} resizeMode="contain" />
+          )}
+          <Text style={styles.title}>QueueUp</Text>
+        </View>
 
         <View style={styles.buttonRow}>
           <Pressable
@@ -123,55 +128,65 @@ export default function HomeScreen({ navigation }: Props) {
           </Pressable>
         </View>
 
-        {joinedQueues.map((queue, index) => (
-          <Pressable
-            key={`joined-${queue.code}`}
-            style={[
-              styles.button,
-              styles.joinedButton,
-              index > 0 && styles.buttonSpacing
-            ]}
-            onPress={() => {
-              navigation.navigate('GuestQueueScreen', {
-                code: queue.code,
-                sessionId: queue.sessionId,
-                partyId: queue.partyId
-              });
-            }}>
-            <Text style={styles.joinedButtonText}>
-              Joined {queue.eventName ? `(${queue.eventName})` : queue.code}
-            </Text>
-          </Pressable>
-        ))}
+        {joinedQueues.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Joined Queues</Text>
+            {joinedQueues.map((queue, index) => (
+              <Pressable
+                key={`joined-${queue.code}`}
+                style={[
+                  styles.button,
+                  styles.joinedButton,
+                  index > 0 && styles.buttonSpacing
+                ]}
+                onPress={() => {
+                  navigation.navigate('GuestQueueScreen', {
+                    code: queue.code,
+                    sessionId: queue.sessionId,
+                    partyId: queue.partyId
+                  });
+                }}>
+                <Text style={styles.joinedButtonText}>
+                  {queue.eventName || queue.code}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
 
-        {activeQueues.map((queue, index) => (
-          <Pressable
-            key={`host-${queue.code}`}
-            style={[
-              styles.button,
-              styles.returnButton,
-              index > 0 && styles.returnButtonSpacing
-            ]}
-            onPress={() => {
-            navigation.navigate('HostQueueScreen', {
-              code: queue.code,
-              sessionId: queue.sessionId,
-              wsUrl: queue.wsUrl,
-              hostAuthToken: queue.hostAuthToken,
-              joinUrl: queue.joinUrl,
-              eventName: queue.eventName,
-              maxGuests: queue.maxGuests,
-              location: queue.location,
-              contactInfo: queue.contactInfo,
-              openTime: queue.openTime,
-              closeTime: queue.closeTime,
-            });
-            }}>
-            <Text style={styles.buttonText}>
-              View {queue.eventName ? `(${queue.eventName})` : queue.code}
-            </Text>
-          </Pressable>
-        ))}
+        {activeQueues.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Hosted Queues</Text>
+            {activeQueues.map((queue, index) => (
+              <Pressable
+                key={`host-${queue.code}`}
+                style={[
+                  styles.button,
+                  styles.returnButton,
+                  index > 0 && styles.returnButtonSpacing
+                ]}
+                onPress={() => {
+                navigation.navigate('HostQueueScreen', {
+                  code: queue.code,
+                  sessionId: queue.sessionId,
+                  wsUrl: queue.wsUrl,
+                  hostAuthToken: queue.hostAuthToken,
+                  joinUrl: queue.joinUrl,
+                  eventName: queue.eventName,
+                  maxGuests: queue.maxGuests,
+                  location: queue.location,
+                  contactInfo: queue.contactInfo,
+                  openTime: queue.openTime,
+                  closeTime: queue.closeTime,
+                });
+                }}>
+                <Text style={styles.buttonText}>
+                  {queue.eventName ? queue.eventName : queue.code}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
       </View>
     </SafeAreaProvider>
   );
