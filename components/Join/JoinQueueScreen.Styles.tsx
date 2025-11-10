@@ -216,17 +216,26 @@ export default StyleSheet.create({
   },
   pushButton: {
     marginTop: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
     backgroundColor: '#f5f5f5',
     borderWidth: 1,
     borderColor: '#ddd',
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
   pushButtonActive: {
     backgroundColor: '#e8f5e9',
     borderColor: '#4caf50',
+  },
+  pushIcon: {
+    fontSize: 16,
+    color: '#333',
+  },
+  pushIconActive: {
+    color: '#2e7d32',
   },
   pushButtonText: {
     fontSize: 14,

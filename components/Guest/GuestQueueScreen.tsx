@@ -11,6 +11,8 @@ import {
     TouchableOpacity,
 } from 'react-native';
 import { ArrowLeft } from 'lucide-react-native';
+import { Bell, Check } from 'lucide-react-native';
+import { ChevronDown, ChevronUp } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import styles from './GuestQueueScreen.Styles';
@@ -21,6 +23,7 @@ import {
   getVapidPublicKey,
   leaveQueue,
   savePushSubscription,
+  type PushSubscriptionParams,
 } from '../../lib/backend';
 import { trackEvent, trackTrustSurveySubmitted } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
@@ -104,9 +107,9 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [called, setCalled] = useState(false);
   const [callDeadline, setCallDeadline] = useState<number | null>(null);
   const [trustSurveyStatus, setTrustSurveyStatus] = useState<'pending' | 'submitted'>('pending');
-  const [trustSurveyAnswer, setTrustSurveyAnswer] = useState<'yes' | 'no' | null>(null);
   const [trustSurveySubmitting, setTrustSurveySubmitting] = useState(false);
   const [eventName, setEventName] = useState<string | null>(null);
+  const [metricsExpanded, setMetricsExpanded] = useState(false);
   const isWeb = Platform.OS === 'web';
 
     // Load eventName from stored joined queue
@@ -328,8 +331,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         stopPolling();
         setConnectionState('connecting');
 
-        console.log('[GuestQueueScreen] Starting polling');
-
         // Poll immediately
         poll();
 
@@ -375,6 +376,14 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                 await subscription.unsubscribe();
                 setPushReady(false);
                 setPushMessage(null);
+                void trackEvent('push_denied', {
+                    sessionId,
+                    partyId,
+                    props: {
+                        screen: ANALYTICS_SCREEN,
+                        reason: 'user_disabled',
+                    },
+                });
                 showModal({
                     title: 'Notifications Disabled',
                     message: 'You will no longer receive browser notifications.',
@@ -382,6 +391,14 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             } else {
                 setPushReady(false);
                 setPushMessage(null);
+                void trackEvent('push_denied', {
+                    sessionId,
+                    partyId,
+                    props: {
+                        screen: ANALYTICS_SCREEN,
+                        reason: 'already_disabled',
+                    },
+                });
                 showModal({
                     title: 'Notifications Disabled',
                     message: 'Notifications were already disabled.',
@@ -389,12 +406,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             }
         } catch (e) {
             console.warn('disablePush failed', e);
+            void trackEvent('push_denied', {
+                sessionId,
+                partyId,
+                props: {
+                    screen: ANALYTICS_SCREEN,
+                    reason: 'disable_failed',
+                },
+            });
             showModal({
                 title: 'Failed to disable notifications',
                 message: 'Please try again in a moment.',
             });
         }
-    }, [showModal]);
+    }, [showModal, sessionId, partyId]);
 
     const enablePush = useCallback(
         async (options?: { silent?: boolean }) => {
@@ -494,10 +519,14 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             });
             subscriptionState = 'new';
             }
+            const subscriptionJson = subscription.toJSON?.();
+            if (!subscriptionJson || !subscriptionJson.endpoint) {
+                throw new Error('Invalid subscription: missing endpoint');
+            }
             await savePushSubscription({
             sessionId,
             partyId,
-            subscription: subscription.toJSON?.() ?? (subscription as any),
+            subscription: subscriptionJson as PushSubscriptionParams,
             });
             console.log('[QueueUp][push] saved subscription', {
             endpoint: subscription.endpoint,
@@ -558,10 +587,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         }
         if (response) {
           setTrustSurveyStatus('submitted');
-          setTrustSurveyAnswer(response.answer);
         } else {
           setTrustSurveyStatus('pending');
-          setTrustSurveyAnswer(null);
         }
       })
       .catch(() => {
@@ -609,7 +636,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
           submittedAt: Date.now(),
         });
         setTrustSurveyStatus('submitted');
-        setTrustSurveyAnswer(answer);
         await trackTrustSurveySubmitted({
           sessionId,
           partyId,
@@ -761,97 +787,105 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
                   <Pressable
                     style={[styles.pushButton, pushReady && styles.pushButtonActive]}
                     onPress={async () => {
-                      console.log('[GuestQueueScreen] Notifications button pressed');
-                      console.log('[GuestQueueScreen] pushReady:', pushReady);
-                      console.log('[GuestQueueScreen] sessionId:', sessionId);
-                      console.log('[GuestQueueScreen] partyId:', partyId);
                       if (pushReady) {
-                        console.log('[GuestQueueScreen] Disabling notifications...');
                         await disablePush();
                       } else if (sessionId && partyId) {
-                        console.log('[GuestQueueScreen] Calling enablePush...');
                         await enablePush();
-                        console.log('[GuestQueueScreen] enablePush completed');
                       } else {
-                        console.log('[GuestQueueScreen] Not calling enablePush - conditions not met');
                         showModal({
                           title: 'Unable to Enable Notifications',
                           message: 'Please wait for the connection to be established.',
                         });
                       }
                     }}>
+                    <Bell
+                       size={16}
+                       color={pushReady ? '#fff' : '#1f6feb'}
+                     />
+                    {pushReady ? <Check size={14} color="#fff" /> : null}
                     <Text
                       style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
-                      {pushReady ? 'Notifications On' : 'Enable Browser Alerts'}
+                      {pushReady ? 'Notifications on' : 'Enable notifications'}
                     </Text>
                   </Pressable>
+                ) : null}
+
+                <View style={styles.metricsDivider} />
+
+                <Pressable
+                  style={styles.metricsHeader}
+                  onPress={() => setMetricsExpanded((prev) => !prev)}>
+                  <Text style={styles.sectionTitle}>Queue details</Text>
+                  {metricsExpanded ? (
+                    <ChevronUp size={18} color="#586069" />
+                  ) : (
+                    <ChevronDown size={18} color="#586069" />
+                  )}
+                </Pressable>
+
+                {metricsExpanded ? (
+                  <View>
+                    <View style={styles.metricsGrid}>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Your Position</Text>
+                        <Text style={styles.metricValue}>
+                          {typeof position === 'number' ? `#${position}` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Ahead of You</Text>
+                        <Text style={styles.metricValue}>
+                          {aheadDisplay != null ? `${aheadDisplay}` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Queue Size</Text>
+                        <Text style={styles.metricValue}>
+                          {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricLabel}>Est. Wait</Text>
+                        <Text style={styles.metricValue}>{etaText}</Text>
+                      </View>
+                    </View>
+
+                    {trustSurveyStatus === 'submitted' ? (
+                      <Text style={styles.trustSurveyThanks}>
+                        Thanks for the feedback!
+                      </Text>
+                    ) : (
+                      <>
+                        <Text style={styles.trustSurveyPrompt}>
+                          Does this queue info seem accurate?
+                        </Text>
+                        <View style={styles.trustSurveyButtons}>
+                          <Pressable
+                            style={styles.trustSurveyButtonPrimary}
+                            onPress={() => handleTrustSurveySubmit('yes')}
+                            disabled={trustSurveySubmitting}>
+                            <Text style={styles.trustSurveyButtonText}>Looks good</Text>
+                          </Pressable>
+                          <Pressable
+                            style={styles.trustSurveyButtonSecondary}
+                            onPress={() => handleTrustSurveySubmit('no')}
+                            disabled={trustSurveySubmitting}>
+                            <Text
+                              style={[
+                                styles.trustSurveyButtonText,
+                                styles.trustSurveyButtonTextSecondary,
+                              ]}>
+                              Seems off
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </>
+                    )}
+                  </View>
                 ) : null}
               </>
             ) : null}
             </View>
-
-            {isActive ? (
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Queue Metrics</Text>
-                <View style={styles.metricsGrid}>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Your Position</Text>
-                    <Text style={styles.metricValue}>
-                      {typeof position === 'number' ? `#${position}` : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Ahead of You</Text>
-                    <Text style={styles.metricValue}>
-                      {aheadDisplay != null ? `${aheadDisplay}` : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Queue Size</Text>
-                    <Text style={styles.metricValue}>
-                      {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.metricItem}>
-                    <Text style={styles.metricLabel}>Est. Wait</Text>
-                    <Text style={styles.metricValue}>{etaText}</Text>
-                  </View>
-                </View>
-              </View>
-            ) : null}
-
-            {isActive ? (
-              <View style={styles.card}>
-                {trustSurveyStatus === 'submitted' ? (
-                  <Text style={styles.trustSurveyThanks}>
-                    Thanks for the feedback!
-                  </Text>
-                ) : (
-                  <>
-                    <Text style={styles.trustSurveyPrompt}>
-                      Does this queue info seem accurate?
-                    </Text>
-                    <View style={styles.trustSurveyButtons}>
-                      <Pressable
-                        style={styles.trustSurveyButtonPrimary}
-                        onPress={() => handleTrustSurveySubmit('yes')}
-                        disabled={trustSurveySubmitting}>
-                        <Text style={styles.trustSurveyButtonText}>Looks good</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.trustSurveyButtonSecondary}
-                        onPress={() => handleTrustSurveySubmit('no')}
-                        disabled={trustSurveySubmitting}>
-                        <Text
-                          style={[styles.trustSurveyButtonText, styles.trustSurveyButtonTextSecondary]}>
-                          Seems off
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </>
-                )}
-              </View>
-            ) : null}
 
             <View style={styles.card}>
             <Text style={styles.sectionTitle}>Your Party</Text>

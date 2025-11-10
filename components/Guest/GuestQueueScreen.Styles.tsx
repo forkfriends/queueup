@@ -54,7 +54,7 @@ export default StyleSheet.create({
         fontSize: 20,
         fontWeight: '800',
         color: '#1c275d',
-        letterSpacing: 2,
+        letterSpacing: 0.5,
     },
     codeBadgeStatus: {
         paddingHorizontal: 14,
@@ -109,19 +109,21 @@ export default StyleSheet.create({
     pushButton: {
         marginTop: 16,
         paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingVertical: 8,
         borderRadius: 14,
         borderWidth: 1,
         borderColor: '#1f6feb',
         backgroundColor: 'transparent',
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
+        alignSelf: 'flex-end',
+        gap: 6,
     },
     pushButtonActive: {
         backgroundColor: '#1f6feb',
     },
     pushButtonText: {
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: '600',
         color: '#1f6feb',
     },
@@ -139,11 +141,29 @@ export default StyleSheet.create({
         marginBottom: 12,
         color: '#111',
     },
+    metricsDivider: {
+        marginTop: 16,
+        marginBottom: 8,
+        height: 1,
+        backgroundColor: '#f0f0f0',
+    },
+    metricsHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 4,
+    },
+    metricsToggleText: {
+        fontSize: 13,
+        color: '#586069',
+        fontWeight: '500',
+    },
     metricsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'space-between',
         gap: 12,
+        marginBottom: 16,
     },
     metricItem: {
         width: '48%',
@@ -181,6 +201,7 @@ export default StyleSheet.create({
     trustSurveyPrompt: {
         fontSize: 15,
         color: '#333',
+        marginTop: 8,
     },
     trustSurveyButtons: {
         flexDirection: 'row',

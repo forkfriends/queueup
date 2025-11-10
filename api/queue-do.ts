@@ -413,7 +413,12 @@ export class QueueDO implements DurableObject {
       return this.handleGuestSnapshot(request, partyId);
     }
 
-    // Host snapshot (read from KV)
+    // Host snapshot (read from KV) - requires host authentication
+    const hostVerified = await this.verifyHostRequest(request);
+    if (hostVerified instanceof Response) {
+      return hostVerified;
+    }
+
     const key = `queue:${this.sessionId}:snapshot`;
     const snapshot = await this.env.QUEUE_KV.get(key);
 
@@ -1443,7 +1448,7 @@ export class QueueDO implements DurableObject {
     this.heartbeatTimer = setInterval(() => {
       const deadSockets: WebSocket[] = [];
 
-      for (const [socket, info] of this.sockets.entries()) {
+      for (const socket of this.sockets.keys()) {
         try {
           const readyState = (socket as any).readyState;
           // 0 = CONNECTING, 1 = OPEN, 2 = CLOSING, 3 = CLOSED

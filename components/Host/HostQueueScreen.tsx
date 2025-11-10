@@ -241,12 +241,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, []);
 
   const poll = useCallback(async () => {
-    if (!hasHostAuth) {
+    if (!hasHostAuth || !hostToken) {
       return;
     }
 
     try {
-      const headers: HeadersInit = {};
+      const headers: HeadersInit = {
+        'x-host-auth': hostToken,
+      };
       // Only send If-None-Match if we've already initialized the queue state
       // This ensures the first poll always fetches data
       if (etag.current && hasInitializedQueue.current) {
@@ -265,7 +267,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         }
         // If we haven't initialized yet, we need to fetch data
         // Retry without If-None-Match header to force a fresh fetch
-        const retryResponse = await fetch(snapshotUrl);
+        const retryResponse = await fetch(snapshotUrl, {
+          headers: { 'x-host-auth': hostToken },
+        });
         if (retryResponse.ok) {
           const newEtag = retryResponse.headers.get('ETag');
           if (newEtag) {
@@ -302,7 +306,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       setConnectionError('Unable to connect to the server');
       setConnectionErrorModalVisible(true);
     }
-  }, [hasHostAuth, snapshotUrl, handleSnapshot]);
+  }, [hasHostAuth, hostToken, snapshotUrl, handleSnapshot]);
 
   const startPolling = useCallback(() => {
     if (!hasHostAuth) {
@@ -316,8 +320,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     stopPolling();
     setConnectionState('connecting');
     setConnectionError(null);
-
-    console.log('[HostQueueScreen] Starting polling');
 
     // Poll immediately
     poll();
@@ -334,7 +336,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       return;
     }
     // Poll immediately when we have host auth and snapshot URL ready
-    console.log('[HostQueueScreen] Immediate poll for queue info');
     poll();
   }, [hasHostAuth, snapshotUrl, poll]);
 
@@ -701,6 +702,20 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     setConnectionErrorModalVisible(false);
   }, []);
 
+  const handleGoHome = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+    clearReconnectTimeout();
+    stopPolling();
+    navigation.replace('HomeScreen');
+  }, [clearReconnectTimeout, stopPolling, navigation]);
+
+  const handleRetryConnection = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+    setConnectionError(null);
+    // Retry polling
+    poll();
+  }, [poll]);
+
   const renderQueueList = () => {
     if (queueCount === 0) {
       return (
@@ -920,15 +935,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
                 maximumZoomScale={3}
                 minimumZoomScale={0.5}>
                 <View style={styles.posterModalImageWrapper}>
-                  {posterImageUrl ? (
-                    <Image
-                      source={{ uri: posterImageUrl }}
-                      style={styles.posterModalImage}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <Text style={styles.posterModalImagePlaceholder}>Poster preview</Text>
-                  )}
+                  <Image
+                    source={{ uri: posterImageUrl }}
+                    style={styles.posterModalImage}
+                    resizeMode="contain"
+                  />
                 </View>
               </ScrollView>
               <View style={styles.posterModalControls}>
@@ -971,8 +982,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
           </Text>
           <View style={styles.webModalActions}>
-            <Pressable style={styles.webModalCancelButton} onPress={handleCloseConnectionErrorModal}>
-              <Text style={styles.webModalCancelText}>OK</Text>
+            <Pressable style={styles.webModalCancelButton} onPress={handleGoHome}>
+              <Text style={styles.webModalCancelText}>Go Home</Text>
+            </Pressable>
+            <Pressable
+              style={styles.webModalConfirmButton}
+              onPress={handleRetryConnection}>
+              <Text style={styles.webModalConfirmText}>Retry</Text>
             </Pressable>
           </View>
         </View>

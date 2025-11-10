@@ -210,7 +210,18 @@ async function generateQrBlob(data: string): Promise<Blob> {
   }
 
   if (ArrayBuffer.isView(qrData)) {
-    return new Blob([qrData.buffer], { type: 'image/png' });
+    // Convert ArrayBufferView to ArrayBuffer for Blob compatibility
+    // Handle SharedArrayBuffer by creating a new ArrayBuffer copy
+    let buffer: ArrayBuffer;
+    if (qrData.buffer instanceof SharedArrayBuffer) {
+      // Create a new ArrayBuffer copy from SharedArrayBuffer
+      buffer = new ArrayBuffer(qrData.buffer.byteLength);
+      const view = new Uint8Array(buffer);
+      view.set(new Uint8Array(qrData.buffer));
+    } else {
+      buffer = qrData.buffer;
+    }
+    return new Blob([buffer], { type: 'image/png' });
   }
 
   throw new Error('Unsupported QR data format');
@@ -253,10 +264,18 @@ async function addLogoToQr(qrImage: HTMLImageElement, logoDataUri?: string): Pro
     const plaqueY = logoY - margin;
     const plaqueRadius = Math.round(POSTER_WIDTH * 0.035);
 
+    // Draw white plaque background
     ctx.fillStyle = '#FFFFFF';
     drawRoundedRect(ctx, plaqueX, plaqueY, plaqueSize, plaqueSize, plaqueRadius);
     ctx.fill();
 
+    // Draw outline around the logo plaque for emphasis
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 8;
+    drawRoundedRect(ctx, plaqueX, plaqueY, plaqueSize, plaqueSize, plaqueRadius);
+    ctx.stroke();
+
+    // Draw the logo itself
     ctx.drawImage(logoImg, logoX, logoY, logoSize, logoSize);
 
     const blob = await canvasToBlob(canvas);
