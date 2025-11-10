@@ -51,6 +51,8 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectionErrorModalVisible, setConnectionErrorModalVisible] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -423,13 +425,19 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         const data = await response.json();
         handleSnapshot(data);
         setConnectionState('open');
+        setConnectionError(null);
+        setConnectionErrorModalVisible(false);
       } else {
         console.warn('[JoinQueueScreen] Poll failed:', response.status);
         setConnectionState('closed');
+        setConnectionError(`Poll failed: ${response.status}`);
+        setConnectionErrorModalVisible(true);
       }
     } catch (error) {
       console.error('[JoinQueueScreen] Poll error:', error);
       setConnectionState('closed');
+      setConnectionError('Unable to connect to the server');
+      setConnectionErrorModalVisible(true);
     }
   }, [snapshotUrl, handleSnapshot]);
 
@@ -670,6 +678,22 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setLeaveConfirmVisibleWeb(false);
   }, [leaveLoading]);
 
+  const handleCloseConnectionErrorModal = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+  }, []);
+
+  const handleGoHome = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+    navigation.navigate('HomeScreen');
+  }, [navigation]);
+
+  const handleRetryConnection = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+    setConnectionError(null);
+    // Retry polling
+    poll();
+  }, [poll]);
+
   const confirmLeave = useCallback(() => {
     if (!joinedCode || !partyId || leaveLoading) {
       return;
@@ -872,6 +896,30 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         </SafeAreaView>
       </Modal>
       {webLeaveModal}
+      <Modal
+        visible={connectionErrorModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseConnectionErrorModal}>
+        <View style={styles.webModalBackdrop}>
+          <View style={styles.webModalCard}>
+            <Text style={styles.webModalTitle}>Connection Error</Text>
+            <Text style={styles.webModalMessage}>
+              {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
+            </Text>
+            <View style={styles.webModalActions}>
+              <Pressable style={styles.webModalCancelButton} onPress={handleGoHome}>
+                <Text style={styles.webModalCancelText}>Go Home</Text>
+              </Pressable>
+              <Pressable
+                style={styles.webModalConfirmButton}
+                onPress={handleRetryConnection}>
+                <Text style={styles.webModalConfirmText}>Retry</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaProvider>
   );
 }

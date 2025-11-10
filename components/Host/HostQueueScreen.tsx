@@ -702,6 +702,18 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     setConnectionErrorModalVisible(false);
   }, []);
 
+  const handleGoHome = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+    navigation.navigate('HomeScreen');
+  }, [navigation]);
+
+  const handleRetryConnection = useCallback(() => {
+    setConnectionErrorModalVisible(false);
+    setConnectionError(null);
+    // Retry polling
+    poll();
+  }, [poll]);
+
   const renderQueueList = () => {
     if (queueCount === 0) {
       return (
@@ -968,8 +980,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
           </Text>
           <View style={styles.webModalActions}>
-            <Pressable style={styles.webModalCancelButton} onPress={handleCloseConnectionErrorModal}>
-              <Text style={styles.webModalCancelText}>OK</Text>
+            <Pressable style={styles.webModalCancelButton} onPress={handleGoHome}>
+              <Text style={styles.webModalCancelText}>Go Home</Text>
+            </Pressable>
+            <Pressable
+              style={styles.webModalConfirmButton}
+              onPress={handleRetryConnection}>
+              <Text style={styles.webModalConfirmText}>Retry</Text>
             </Pressable>
           </View>
         </View>
