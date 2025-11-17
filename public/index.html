@@ -32,7 +32,9 @@
         var isLocalhost =
           window.location.hostname === 'localhost' ||
           window.location.hostname === '127.0.0.1';
-        var basePath = isLocalhost ? '' : '/queueup';
+        // If the site is served from /queueup (old GitHub Pages project site), keep that prefix.
+        // Otherwise (root domain like forkfriends.github.io), use no prefix.
+        var basePath = !isLocalhost && window.location.pathname.startsWith('/queueup') ? '/queueup' : '';
 
         // Inject manifest link
         var manifestLink = document.createElement('link');
