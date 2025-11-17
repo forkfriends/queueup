@@ -73,10 +73,7 @@ export default function App() {
 
   return (
     <ModalProvider>
-      <NavigationContainer
-        ref={navigationRef}
-        onStateChange={handleStateChange}
-        onReady={handleReady}>
+      <NavigationContainer ref={navigationRef} onStateChange={handleStateChange} onReady={handleReady}>
         <StatusBar style="auto" />
         <Stack.Navigator
           initialRouteName="HomeScreen"
