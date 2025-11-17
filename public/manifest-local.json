@@ -1,7 +1,7 @@
 {
-  "name": "QueueUp",
+  "name": "QueueUp (Local)",
   "short_name": "QueueUp",
-  "description": "Queue management made simple",
+  "description": "Queue management made simple (local dev)",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

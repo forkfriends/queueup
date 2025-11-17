@@ -58,6 +58,9 @@ export default function App() {
     if (currentRoute) {
       const screenTitle = getScreenTitle(currentRoute.name);
       document.title = `QueueUp - ${screenTitle}`;
+    } else {
+      // Fallback before navigation state is ready (e.g. first load)
+      document.title = 'QueueUp - Home';
     }
   };
 

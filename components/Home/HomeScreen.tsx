@@ -107,7 +107,18 @@ export default function HomeScreen({ navigation }: Props) {
 
         <View style={styles.titleContainer}>
           {Platform.OS === 'web' ? (
-            <Image source={{ uri: '/queueup/icon-black.svg' }} style={styles.logoIcon} resizeMode="contain" />
+            <Image
+              source={{
+                uri:
+                  typeof window !== 'undefined' &&
+                  (window.location.hostname === 'localhost' ||
+                    window.location.hostname === '127.0.0.1')
+                    ? '/icon-black.svg'
+                    : '/icon-black.svg',
+              }}
+              style={styles.logoIcon}
+              resizeMode="contain"
+            />
           ) : (
             <Image source={require('@assets/ff_logo.png')} style={styles.logoIcon} resizeMode="contain" />
           )}

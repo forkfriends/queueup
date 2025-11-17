@@ -486,8 +486,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             }
             };
             const isGhPages = window.location.pathname.startsWith('/queueup');
-            const swPath = isGhPages ? '/queueup/sw.js' : '/sw.js';
-            const swScope = isGhPages ? '/queueup/' : '/';
+            const swPath = isGhPages ? '/sw.js' : '/sw.js';
+            const swScope = isGhPages ? '/' : '/';
             const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
             let subscription = await registration.pushManager.getSubscription();
             let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
