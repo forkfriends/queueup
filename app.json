@@ -19,7 +19,7 @@
     },
     "experiments": {
       "tsconfigPaths": true,
-      "baseUrl": "/queueup"
+      "baseUrl": "/"
     },
     "plugins": [],
     "orientation": "portrait",
