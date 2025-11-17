@@ -14,8 +14,8 @@
       "backgroundColor": "#ffffff",
       "display": "standalone",
       "orientation": "portrait",
-      "scope": "/queueup/",
-      "startUrl": "/queueup/"
+      "scope": "/",
+      "startUrl": "/"
     },
     "experiments": {
       "tsconfigPaths": true,

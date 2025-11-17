@@ -6,7 +6,7 @@ const LOGO_PATH =
   (window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1')
     ? '/icon-black.svg'
-    : '/queueup/icon-black.svg';
+    : '/icon-black.svg';
 const FONT_FAMILY = 'Plus Jakarta Sans, "Helvetica Neue", "Segoe UI", sans-serif';
 
 const GRADIENT_SETS: [string, string, number][] = [

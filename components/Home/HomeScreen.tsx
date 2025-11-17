@@ -114,7 +114,7 @@ export default function HomeScreen({ navigation }: Props) {
                   (window.location.hostname === 'localhost' ||
                     window.location.hostname === '127.0.0.1')
                     ? '/icon-black.svg'
-                    : '/queueup/icon-black.svg',
+                    : '/icon-black.svg',
               }}
               style={styles.logoIcon}
               resizeMode="contain"
