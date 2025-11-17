@@ -108,4 +108,10 @@ export default StyleSheet.create({
     textAlign: 'left',
     width: '100%',
   },
+  privacyLink: {
+    marginTop: 32,
+    fontSize: 12,
+    color: '#555',
+    textDecorationLine: 'underline',
+  },
 });
