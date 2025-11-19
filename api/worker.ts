@@ -24,7 +24,7 @@ export interface Env {
   APP_BASE_URL?: string;
 }
 
-const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/queueup/';
+const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/';
 const MS_PER_MINUTE = 60 * 1000;
 const FALLBACK_CALL_WINDOW_MINUTES = 2;
 

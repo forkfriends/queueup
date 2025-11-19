@@ -11,27 +11,64 @@
     <meta name="theme-color" content="#222222" />
 
     <!-- iOS Meta Tags -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- Note: apple-mobile-web-app-capable is deprecated; modern Safari PWAs no longer require it -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="QueueUp" />
+    <meta name="mobile-web-app-capable" content="yes" />
 
-    <!-- Apple Touch Icons -->
-    <link rel="apple-touch-icon" href="/queueup/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/queueup/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/queueup/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="120x120" href="/queueup/icon-192.png" />
+    <!-- Apple Touch Icon (iOS home screen) -->
+    <!-- This href will be rewritten below based on localhost vs /queueup deployment -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
     <!-- Favicons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/queueup/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/queueup/icon-192.png" />
-    <link rel="shortcut icon" href="/queueup/icon-192.png" />
+    <!-- These hrefs will be rewritten below in production to include /queueup -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
 
     <!-- Google AdSense -->
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1031200014799170"
       crossorigin="anonymous"></script>
 
     <!-- Web App Manifest -->
-    <link rel="manifest" href="/queueup/manifest.json" />
+    <script>
+      (function () {
+        var isLocalhost =
+          window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1';
+        // If the site is served from /queueup (old GitHub Pages project site), keep that prefix.
+        // Otherwise (root domain like forkfriends.github.io), use no prefix.
+        var basePath = !isLocalhost && window.location.pathname.startsWith('/queueup') ? '/queueup' : '';
+
+        // Inject manifest link
+        var manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = isLocalhost
+          ? '/manifest-local.json'
+          : basePath + '/manifest.json';
+        document.head.appendChild(manifestLink);
+
+        // Update apple-touch-icon to respect basePath
+        var appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+        if (appleIcon) {
+          appleIcon.href = basePath + '/apple-touch-icon.png';
+        }
+
+        // Update favicons to respect basePath
+        var favicons = document.querySelectorAll(
+          'link[rel="icon"], link[rel="shortcut icon"]'
+        );
+        favicons.forEach(function (link) {
+          var url = new URL(link.href, window.location.origin);
+          if (url.pathname.endsWith('/favicon.png')) {
+            link.href = basePath + '/favicon.png';
+          }
+          if (url.pathname.endsWith('/favicon.ico')) {
+            link.href = basePath + '/favicon.ico';
+          }
+        });
+      })();
+    </script>
 
     <title>QueueUp</title>
 

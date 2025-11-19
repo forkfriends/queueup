@@ -14,12 +14,12 @@
       "backgroundColor": "#ffffff",
       "display": "standalone",
       "orientation": "portrait",
-      "scope": "/queueup/",
-      "startUrl": "/queueup/"
+      "scope": "/",
+      "startUrl": "/"
     },
     "experiments": {
       "tsconfigPaths": true,
-      "baseUrl": "/queueup"
+      "baseUrl": "/"
     },
     "plugins": [],
     "orientation": "portrait",
