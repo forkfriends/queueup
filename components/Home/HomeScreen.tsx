@@ -198,6 +198,10 @@ export default function HomeScreen({ navigation }: Props) {
             ))}
           </View>
         )}
+
+        <Pressable onPress={() => navigation.navigate('PrivacyPolicyScreen')}>
+          <Text style={styles.privacyLink}>Privacy Policy</Text>
+        </Pressable>
       </View>
     </SafeAreaProvider>
   );

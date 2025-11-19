@@ -10,6 +10,7 @@ import MakeQueueScreen from './components/Make/MakeQueueScreen';
 import JoinQueueScreen from './components/Join/JoinQueueScreen';
 import HostQueueScreen from './components/Host/HostQueueScreen';
 import GuestQueueScreen from './components/Guest/GuestQueueScreen';
+import PrivacyPolicyScreen from './components/PrivacyPolicy/PrivacyPolicyScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
 
@@ -42,6 +43,7 @@ const getScreenTitle = (screenName: string): string => {
     JoinQueueScreen: 'Join Queue',
     HostQueueScreen: 'Host Queue',
     GuestQueueScreen: 'Guest Queue',
+    PrivacyPolicyScreen: 'Privacy Policy',
   };
   return screenTitles[screenName] || screenName;
 };
@@ -126,6 +128,11 @@ export default function App() {
           <Stack.Screen
             name="HostQueueScreen"
             component={HostQueueScreen}
+            options={{ title: '' }}
+          />
+          <Stack.Screen
+            name="PrivacyPolicyScreen"
+            component={PrivacyPolicyScreen}
             options={{ title: '' }}
           />
         </Stack.Navigator>
