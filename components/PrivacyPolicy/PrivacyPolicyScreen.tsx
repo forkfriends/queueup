@@ -31,7 +31,7 @@ function PrivacyPolicyScreen({ navigation }: Props) {
             </Text>
 
             <Text style={styles.paragraph}>
-                {`This Privacy Policy describes the policies of ForkFriends, 801 Atlantic Drive NW, GA 30332, United States of America (the), email: eth4n007@gmail.com, phone: 4703015218 on the collection, use and disclosure of your information that we collect when you use our website ( https://forkfriends.github.io/ ). (the “Service”). By accessing or using the Service, you are consenting to the collection, use and disclosure of your information in accordance with this Privacy Policy. If you do not consent to the same, please do not access or use the Service.`}
+                {`This Privacy Policy describes the policies of ForkFriends, 801 Atlantic Drive NW, GA 30332, United States of America (the), email: eth4n007@gmail.com on the collection, use and disclosure of your information that we collect when you use our website ( https://forkfriends.github.io/ ). (the “Service”). By accessing or using the Service, you are consenting to the collection, use and disclosure of your information in accordance with this Privacy Policy. If you do not consent to the same, please do not access or use the Service.`}
             </Text>
 
             <Text style={styles.paragraph}>
@@ -72,17 +72,6 @@ function PrivacyPolicyScreen({ navigation }: Props) {
             </View>
 
             <View style={styles.section}>
-                <Text style={styles.sectionHeading}>COOKIES ETC.</Text>
-
-                <Text style={styles.paragraph}>
-                {`To learn more about how we use these and your choices in relation to these tracking technologies, please refer to our `}
-                <Text style={styles.link} onPress={handleOpenCookiePolicy}>
-                    Cookie Policy.
-                </Text>
-                </Text>
-            </View>
-
-            <View style={styles.section}>
                 <Text style={styles.sectionHeading}>SECURITY:</Text>
 
                 <Text style={styles.paragraph}>
@@ -97,14 +86,6 @@ function PrivacyPolicyScreen({ navigation }: Props) {
                 {`If you have any queries or concerns about the processing of your information that is available with us, you may email our Grievance Officer at ForkFriends, 801 Atlantic Drive NW, email: eth4n007@gmail.com. We will address your concerns in accordance with applicable law.`}
                 </Text>
             </View>
-
-          <Text style={styles.paragraph}>
-            {`Privacy Policy generated with `}
-            <Text style={styles.link} onPress={handleOpenCookieYes}>
-              CookieYes
-            </Text>
-            {`.`}
-          </Text>
         </ScrollView>
       </View>
     </SafeAreaView>
