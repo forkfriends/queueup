@@ -33,8 +33,8 @@ const DEFAULT_QUEUE_SIZE = 20;
 const MAPBOX_GEOCODING_URL = 'https://api.mapbox.com/geocoding/v5/mapbox.places';
 const MAPBOX_SEARCH_DEBOUNCE_MS = 400;
 const MIN_LOCATION_QUERY_LENGTH = 3;
-const MAPBOX_TOKEN =
-  (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN : undefined) ?? '';
+// Metro/Expo inlines environment variables at build time, so we don't need runtime guards here.
+const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
 const ANALYTICS_SCREEN = 'make_queue';
 
 type TimeField = 'open' | 'close';
